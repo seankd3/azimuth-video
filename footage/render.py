@@ -4,8 +4,8 @@ The timeline is the whole edit: video track 1 is picture, every audio track is m
 `metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21). Kdenlive and Resolve open the same file.
 The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
 Stills go through exactly the same picture graph, so an approved still is what the video will show.
-A focus pull in a still shot (nothing else moving) is retimed so the focus eases in and out evenly over the same
-duration; neighbouring frames are blended, which for a pull looks like an in-between focus. Cut points don't move.
+A focus pull in a still shot is retimed so the focus eases in and out evenly over the same duration (smooth.py);
+blended frames look like in-between focus. Cut points don't move.
 
 python -m footage.render EDIT.otio
 python -m footage.render --stills OUT_DIR CLIP@SECONDS ...
@@ -18,11 +18,10 @@ from pathlib import Path
 import numpy as np
 import opentimelineio as otio
 
-from . import grade, library, sidecar
+from . import grade, library, sidecar, smooth
 
 ASPECT = 2.39
 FADE_OUT = 1.0
-SMOOTH_MOTION, SMOOTH_PAN = 0.35, 0.08  # a pull is smoothed only in a still shot: no subject motion, no pan
 # ffmpeg-gpu (BtbN build) has 10-bit x265; Arch ARM's x265 is 8-bit only, and ffmpeg silently falls back to 8-bit.
 FFMPEG = "ffmpeg-gpu"
 
@@ -47,35 +46,11 @@ def frame_size(scs: list) -> tuple[int, int]:
     return round(h * ASPECT / 2) * 2, h
 
 
-def ease(x):
-    return x * x * (3 - 2 * x)
-
-
 def retime(sc: dict, start: float, dur: float) -> str | None:
-    """Filters that ease each still focus pull inside this shot [start, start + dur], or None if there is none."""
-    knots = [(0.0, 0.0)]
-    grid = np.linspace(0, 1, 2001)
-    for p in sc.get("focus", {}).get("pulls", []):
-        if p["motion"] > SMOOTH_MOTION or p["pan"] > SMOOTH_PAN or p["start"] < start or p["end"] > start + dur:
-            continue
-        t, c = np.unique([pt[0] for pt in p["curve"]], return_index=True)
-        c = np.maximum.accumulate(np.array([pt[1] for pt in p["curve"]])[c])
-        c = (c - c[0]) / max(c[-1] - c[0], 1e-9)
-        # How far the focus had travelled at each source frame; a little of plain time keeps it strictly increasing,
-        # so a pause in the pull still takes some time instead of none.
-        travel = 0.9 * c + 0.1 * (t - t[0]) / (t[-1] - t[0])
-        u = t[0] + (t[-1] - t[0]) * np.interp(travel, ease(grid), grid)  # when that much travel happens, eased
-        knots += [(a - start, b - start) for a, b in zip(t, u) if knots[-1][0] < a - start]
-    if len(knots) == 1:
-        return None
-    if knots[-1][0] < dur:
-        knots.append((dur, dur))
-    expr = None
-    for (t0, u0), (t1, u1) in reversed(list(zip(knots, knots[1:]))):
-        seg = f"{u0:.5f}+(T-{t0:.5f})*{(u1 - u0) / (t1 - t0):.6f}"
-        expr = seg if expr is None else f"if(lt(T,{t1:.5f}),{seg},{expr})"
-    rate = sc["facts"]["fps"]
-    return f"setpts='({expr})/TB',framerate=fps={rate}:interp_start=0:interp_end=255:scene=100,"
+    """Filters that apply the smoothest retime of each still focus pull inside this shot, or None if there is none."""
+    points = sorted(k for p in sc.get("focus", {}).get("pulls", []) if p.get("smooth")
+                    and p["start"] >= start and p["end"] <= start + dur for k in p["smooth"]["knots"])
+    return smooth.filters(points, start, dur, sc["facts"]["fps"]) if points else None
 
 
 def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look: Path = grade.LOOK) -> list[str]:

@@ -4,8 +4,8 @@ A pull is sharpness moving across a still picture. Every frame is read small and
 tracked in an 8x4 grid of regions and motion in a coarse thumbnail. A pull is a stretch where the regions' sharpness
 changes a lot, one way (not the back-and-forth of hands crossing a shallow focus plane), while the picture holds still.
 Its start and end are where 5% and 95% of the focus change has happened: cut just before one and just after the other.
-Each pull also records how still the picture was (motion, and pan from frame-to-frame phase correlation) and its curve:
-how far the focus had travelled at each moment, which the render uses to smooth a pull in a still shot.
+Each pull also records how still the picture was (motion, and pan from frame-to-frame phase correlation). A pull in a
+still shot gets `smooth`: the retime that makes it smoothest (smooth.py), which the render applies.
 """
 import subprocess
 from pathlib import Path
@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import median_filter, uniform_filter1d
 
-VERSION = 3
+VERSION = 4
 W, H, GX, GY = 640, 210, 8, 4
 NET_MIN = 0.45  # mean change in log sharpness per second across regions
 COHERENT = 0.6  # net change over a second / the path it took: one way, not back and forth
@@ -21,6 +21,7 @@ STILL = 1.2  # thumbnail change per frame, above which the camera or subject is 
 PULL_MIN = 1.2  # mean log-sharpness change from start to end for a pull worth cutting on
 PULL_SECONDS = 1.0
 PULL_STILL = 1.0
+STILL_MOTION, STILL_PAN = 0.35, 0.08  # only a pull with nothing else moving is retimed: no subject motion, no pan
 
 
 def grid_sharpness(clip: Path, fps: float, squeeze: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -100,18 +101,19 @@ def pulls(sharp: np.ndarray, thumbs: np.ndarray, pans: np.ndarray, fps: float) -
             continue
         gained, lost = delta > 0.5, delta < -0.5
         kind = "rack" if gained.sum() >= 3 and lost.sum() >= 3 else ("focus in" if gained.sum() > lost.sum() else "focus out")
-        travelled = np.concatenate([[0], np.cumsum(steps[a:b])])
-        travelled /= max(travelled[-1], 1e-9)
-        every = max(int(fps / 10), 1)
-        out.append({"start": round(a / fps, 2), "end": round(b / fps, 2), "kind": kind,
+        out.append({"start": round(a / fps, 2), "end": round(b / fps, 2), "frames": [int(a), int(b)], "kind": kind,
                     "from": where(lost), "to": where(gained), "strength": round(strength, 2),
-                    "motion": round(float(motion[a:b + 1].mean()), 2), "pan": round(float(np.median(pans[a + 1:b + 1])), 3),
-                    "curve": [[round((a + k) / fps, 3), round(float(travelled[k]), 3)] for k in range(0, b - a + 1, every)]
-                             + [[round(b / fps, 3), 1.0]]})
+                    "motion": round(float(motion[a:b + 1].mean()), 2), "pan": round(float(np.median(pans[a + 1:b + 1])), 3)})
     return out
 
 
 def focus(clip: Path, sc: dict) -> dict:
     num, den = map(int, sc["facts"]["fps"].split("/"))
-    sharp, thumbs, pans = grid_sharpness(clip, num / den, sc["assumed"]["squeeze"])
-    return {"v": VERSION, "pulls": pulls(sharp, thumbs, pans, num / den)}
+    from . import smooth
+    fps = num / den
+    sharp, thumbs, pans = grid_sharpness(clip, fps, sc["assumed"]["squeeze"])
+    found = pulls(sharp, thumbs, pans, fps)
+    for p in found:
+        still = p["motion"] <= STILL_MOTION and p["pan"] <= STILL_PAN
+        p["smooth"] = smooth.best(clip, sharp, *p["frames"], fps, sc["facts"]["fps"], sc["facts"]["duration"]) if still else None
+    return {"v": VERSION, "pulls": found}
