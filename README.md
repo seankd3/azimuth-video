@@ -43,7 +43,12 @@ python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links
 ```
 
-The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the library. A timeline picks its look
+The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the library. A layout that stays tidy:
+
+- `~/Videos/Ingest/`: the inbox. Copy from the card here.
+- `~/Videos/Library/`: raw footage, one folder per shooting day. Timelines point into it, so keep its name.
+- `~/Videos/Edits/<date> <name>/`: finished edits. The timeline, its renders ("EDIT - LOOK.mp4"), and its stills.
+- `~/Videos/Toolkit tests/<topic>/`: experiments, comparisons and before/after tests. A timeline picks its look
 with `metadata["footage"]["look"]`; `--look` overrides it. Runs and renders use idle CPU and disk priority, so they
 take only what the desktop leaves.
 
