@@ -27,7 +27,7 @@ def steady(sc: dict) -> list[tuple[int, int]] | None:
             start = s if start is None else start
         else:
             if start is not None and min(s, end) - start >= STEADY_SECONDS:
-                runs.append((start, round(min(s, end), 1)))
+                runs.append((start, min(s, end)))
             start = None
     return runs
 
@@ -59,7 +59,7 @@ def matches(sc: dict, a) -> bool:
 
 
 def line(r: dict) -> str:
-    where = ([f"steady {', '.join(f'{a}-{b}s' for a, b in r['steady'])}"] if r["steady"] else
+    where = ([f"steady {', '.join(f'{a}-{b:.1f}s'.replace('.0s', 's') for a, b in r['steady'])}"] if r["steady"] else
              ["handheld"] if r["steady"] == [] else []) + \
             ([f"pulls {', '.join(f'{a:.1f}-{b:.1f}s' for a, b, _ in r['pulls'])}"] if r["pulls"] else []) + \
             ([f"speech {len(r['speech'])}"] if r["speech"] else [])

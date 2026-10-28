@@ -121,10 +121,18 @@ def plan(moves: np.ndarray, fps: float, full: tuple[float, float], size: tuple[i
     ww, hh = w + 2, h + 2  # a pixel to spare on each side for rounding
 
     def zoom(fix: np.ndarray) -> float:
-        x, y, r = np.abs(fix).max(axis=0)
-        if x >= fw / 2 or y >= fh / 2:
+        """The least zoom at which every corner of the window, as the render places it, lies inside the frame.
+
+        The render scales the frame by the zoom, turns it about its centre by the roll, and crops the window centred
+        at minus the correction times the zoom. Taken back through the turn, a corner sits at the turned offset plus
+        the turned half-window, and both grow with the zoom except the half-window."""
+        c, s = np.cos(fix[:, 2]), np.sin(fix[:, 2])
+        ox, oy = -fix[:, 0], -fix[:, 1]
+        ux, uy = np.abs(c * ox + s * oy), np.abs(-s * ox + c * oy)  # the offset as the source sees it, per unit zoom
+        half_x, half_y = ww / 2 * np.abs(c) + hh / 2 * np.abs(s), ww / 2 * np.abs(s) + hh / 2 * np.abs(c)
+        if (ux >= fw / 2).any() or (uy >= fh / 2).any():
             return np.inf
-        return max(1.0, (ww / 2 + hh / 2 * r) / (fw / 2 - x), (hh / 2 + ww / 2 * r) / (fh / 2 - y))
+        return float(max(1.0, (half_x / (fw / 2 - ux)).max(), (half_y / (fh / 2 - uy)).max()))
 
     for smooth in (SMOOTH, SMOOTH / 2, SMOOTH / 4):
         fix = correction(track, fps, smooth)
