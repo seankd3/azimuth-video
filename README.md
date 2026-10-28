@@ -22,7 +22,9 @@ selects and timelines read these sidecars, so an AI agent can find shots and bui
 
    The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
 
-Kdenlive and DaVinci Resolve open the same timeline files.
+Kdenlive and DaVinci Resolve open the same timeline files. A timeline can also hold title cards (an OTIO
+GeneratorReference of kind `title`) and music, and `python -m footage.music TRACK` finds a track's beats and
+loudness so cuts can land on the beat.
 
 ## Use
 

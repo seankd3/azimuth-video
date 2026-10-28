@@ -3,6 +3,8 @@
 The timeline is the whole edit: video track 1 is picture, every audio track is mixed under it. An audio clip may set
 `metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21). Kdenlive and Resolve open the same file.
 The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
+A clip whose media reference is a GeneratorReference of kind "title" is a title card: its `text` on black, fading in
+and out, with optional `size` (share of the frame height), `font` (a fontconfig name) and `fade` (seconds).
 Stills go through exactly the same picture graph, so an approved still is what the video will show.
 A focus pull in a still shot is retimed so the focus eases in and out evenly over the same duration (smooth.py);
 blended frames look like in-between focus. Cut points don't move.
@@ -12,6 +14,7 @@ python -m footage.render --stills OUT_DIR CLIP@SECONDS ...
 """
 import argparse
 import subprocess
+from fractions import Fraction
 import tempfile
 from pathlib import Path
 
@@ -21,17 +24,32 @@ import opentimelineio as otio
 from . import grade, library, sidecar, smooth
 
 ASPECT = 2.39
-FADE_OUT = 1.0
+FADE_IN, FADE_OUT = 0.8, 1.0
 # ffmpeg-gpu (BtbN build) has 10-bit x265; Arch ARM's x265 is 8-bit only, and ffmpeg silently falls back to 8-bit.
 FFMPEG = "ffmpeg-gpu"
 
 
 def items(track: otio.schema.Track):
-    """(clip path, source start s, duration, timeline start s, metadata) for each clip on a track."""
+    """(clip path or None for a generated clip, source start s, duration, timeline start s, clip) for each clip."""
     for item in track:
         if isinstance(item, otio.schema.Clip):
             at = track.range_of_child(item).start_time.to_seconds()
-            yield Path(item.media_reference.target_url), item.source_range.start_time.to_seconds(), item.source_range.duration, at, item.metadata
+            ref = item.media_reference
+            path = Path(ref.target_url) if isinstance(ref, otio.schema.ExternalReference) else None
+            yield path, item.source_range.start_time.to_seconds(), item.source_range.duration, at, item
+
+
+def title(clip: otio.schema.Clip, size: tuple[int, int], rate: str, frames: int, tag: str) -> str:
+    """A title card: white text centred on black, fading in and out, as 16-bit RGB at [tag]."""
+    p = clip.media_reference.parameters
+    w, h = size
+    d, fade = frames / float(Fraction(rate)), float(p.get("fade", 1.0))
+    font = subprocess.run(["fc-match", "-f", "%{file}", p.get("font", "Sans")], capture_output=True, text=True).stdout
+    text = str(p["text"]).replace("\\", "\\\\").replace("'", "\u2019").replace(":", "\\:")
+    alpha = f"if(lt(t,{fade}),t/{fade},if(gt(t,{d - fade:.3f}),({d:.3f}-t)/{fade},1))"
+    return (f"color=c=black:s={w}x{h}:r={rate}:d={d + 1:.3f},format=yuv444p,"
+            f"drawtext=fontfile='{font}':text='{text}':fontcolor=white:fontsize={round(h * float(p.get('size', 0.045)))}:"
+            f"x=(w-text_w)/2:y=(h-text_h)/2:alpha='{alpha}',trim=end_frame={frames},format=gbrp16le[{tag}]")
 
 
 def window(f: dict, squeeze: float) -> tuple[int, int]:
@@ -77,31 +95,36 @@ def render(edit: Path) -> Path:
     timeline = otio.adapters.read_from_file(str(edit))
     out = edit.with_suffix(".mp4")
     total = timeline.duration().to_seconds()
-    shots = [(p, sidecar.read(p[0])) for p in items(timeline.video_tracks()[0])]
-    size = frame_size([sc for _, sc in shots])
-    cmd, graph = [FFMPEG, "-v", "error", "-stats", "-y"], []
+    pictures = [(p, sidecar.read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
+    filmed = [sc for _, sc in pictures if sc]
+    size, rate = frame_size(filmed), filmed[0]["facts"]["fps"]
+    cmd, graph, inputs = [FFMPEG, "-v", "error", "-stats", "-y"], [], 0
     with tempfile.TemporaryDirectory() as tmp:
-        for i, ((clip, start, dur, _, _), sc) in enumerate(shots):
+        for i, ((clip, start, dur, _, item), sc) in enumerate(pictures):
+            n = round(dur.to_frames())
+            if sc is None:
+                graph.append(title(item, size, rate, n, f"v{i}"))
+                continue
             # Two decoder threads per input: sixteen 4K inputs at the default thread count would hold many GB of frames.
             cmd += ["-threads", "2", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", str(clip)]
-            n = round(dur.to_frames())
             eased = retime(sc, start, dur.to_seconds()) or ""
-            graph.append(f"[{i}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
+            graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
             graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}")
+            inputs += 1
         # The camera's full-range flag must not reach the master: players expect standard (limited) range.
-        graph.append("".join(f"[v{i}]" for i in range(len(shots))) + f"concat=n={len(shots)}:v=1:a=0,"
-                     f"fade=t=out:st={total - FADE_OUT:.3f}:d={FADE_OUT},"
+        graph.append("".join(f"[v{i}]" for i in range(len(pictures))) + f"concat=n={len(pictures)}:v=1:a=0,"
+                     f"fade=t=in:d={FADE_IN},fade=t=out:st={total - FADE_OUT:.3f}:d={FADE_OUT},"
                      f"scale=out_color_matrix=bt709:out_range=limited,format=yuv420p10le[v]")
         mix = []
         for track in timeline.audio_tracks():
-            for clip, start, dur, at, meta in items(track):
-                n = len(shots) + len(mix)
+            for clip, start, dur, at, item in items(track):
                 cmd += ["-ss", f"{start:.3f}", "-t", f"{dur.to_seconds():.3f}", "-i", str(clip)]
                 d = dur.to_seconds()
-                graph.append(f"[{n}:a]loudnorm=I={meta.get('footage', {}).get('lufs', -20)}:TP=-2,aresample=48000,"
+                graph.append(f"[{inputs}:a]loudnorm=I={item.metadata.get('footage', {}).get('lufs', -20)}:TP=-2,aresample=48000,"
                              f"afade=t=in:d=0.08,afade=t=out:st={max(d - 0.08, 0):.3f}:d=0.08,"
                              f"adelay={round(at * 1000)}:all=1[m{len(mix)}]")
-                mix.append(n)
+                mix.append(inputs)
+                inputs += 1
         maps = ["-map", "[v]"]
         if mix:
             graph.append("".join(f"[m{k}]" for k in range(len(mix))) + f"amix=inputs={len(mix)}:normalize=0:duration=longest,"
@@ -112,7 +135,7 @@ def render(edit: Path) -> Path:
                 "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error",
                 "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
                 "-write_tmcd", "0", "-movflags", "+faststart", str(out)]
-        print(f"  {len(shots)} shots at {size[0]}x{size[1]}", flush=True)
+        print(f"  {len(pictures)} shots at {size[0]}x{size[1]}", flush=True)
         subprocess.run(cmd, check=True)
     return out
 
