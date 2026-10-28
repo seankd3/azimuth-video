@@ -129,7 +129,8 @@ def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> tuple[Path, Path
     picture = sample(read_cube(look.lut), pivot + (color.to_acescct(lin) - pivot) * look.contrast)
     picture = np.stack([np.interp(picture[:, c], *grey_axis(look.lut)[c]) for c in range(3)], axis=-1)
     # Move only the ends of the print: the top toward the look's white, the bottom toward its black; mid-tones stay.
-    black, white = read_cube(look.lut)[0, 0, 0].mean(), read_cube(look.lut)[-1, -1, -1].mean()
+    ends = grey_axis(look.lut)[0][1]  # the timed print's black and white
+    black, white = ends[0], ends[-1]
     if look.white is not None:
         s = np.clip((picture - 0.5) / (white - 0.5), 0, 1)
         picture = picture + s * s * (look.white - white)
@@ -158,6 +159,16 @@ def write_glow(folder: Path, look: Look) -> tuple[Path, Path, Path]:
     x = np.linspace(0, 1, 65536)[:, None] * np.ones(3)
     glow = np.minimum(look.halation * HALATION_SCALE * np.linspace(0, 1, 4096)[:, None] * np.array(look.halation_tint), 1)
     return write("glow.cube", glow), write("decode.cube", x ** 2.4), write("encode.cube", x ** (1 / 2.4))
+
+
+def write_vignette(path: Path, size: tuple[int, int], look: Look) -> Path:
+    """A 16-bit mask of lens falloff: cos^4 of the distance from the centre, the corners look.vignette stops darker."""
+    import cv2
+    w, h = size
+    y, x = np.ogrid[:h, :w]
+    d = np.hypot(x - w / 2, y - h / 2) / np.hypot(w / 2, h / 2)
+    cv2.imwrite(str(path), np.round(np.cos(np.arccos(2 ** (-look.vignette / 4)) * d) ** 4 * 65535).astype(np.uint16))
+    return path
 
 
 if __name__ == "__main__":

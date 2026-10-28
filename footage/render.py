@@ -9,14 +9,14 @@ A clip whose media reference is a GeneratorReference of kind "title" is a title 
 and out, with optional `size` (share of the frame height), `font` (a fontconfig name) and `fade` (seconds).
 Stills go through exactly the same picture graph, so an approved still is what the video will show.
 A focus pull in a still shot is retimed so the focus eases in and out evenly over the same duration (smooth.py);
-blended frames look like in-between focus. Cut points don't move.
+blended frames look like in-between focus. Cut points don't move. A handheld shot is stabilized (steady.py): its
+window follows the shake inside the wider desqueezed frame, so the shake is gone and the deliberate move stays.
+A still shows a stabilized shot as framed without stabilization, up to steady.MOST_ZOOM wider.
 
 python -m footage.render EDIT.otio [--look NAME,NAME...]
 python -m footage.render --stills OUT_DIR [--look NAME,NAME...] CLIP@SECONDS ...
 """
 import argparse
-import math
-import os
 import subprocess
 from fractions import Fraction
 import tempfile
@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 import opentimelineio as otio
 
-from . import grade, library, sidecar, smooth
+from . import grade, idle, library, sidecar, smooth, steady
 
 ASPECT = 2.39
 FADE_IN, FADE_OUT = 0.8, 1.0
@@ -63,6 +63,24 @@ def window(f: dict, squeeze: float) -> tuple[int, int]:
     return f["width"], round(f["width"] * squeeze / ASPECT / 2) * 2
 
 
+def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: str) -> str:
+    """Filters from camera frames to the desqueezed 2.39:1 picture at size, as 16-bit RGB: still, or stabilized by `fix`."""
+    w, h = size
+    if fix is None:
+        cw, ch = window(sc["facts"], sc["assumed"]["squeeze"])
+        return f"crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le"
+    z, shift, turn = fix["zoom"], fix["fix"], fix["roll"]
+    fw, fh = round(h * steady.full_width(sc) * z / 2) * 2, round(h * z / 2) * 2
+    # The window follows the shake (centre minus the correction), so the picture holds where the smoothed path puts it.
+    x = np.clip(np.round((fw - w) / 2 - shift[:, 0] * z), 0, fw - w).astype(int)
+    y = np.clip(np.round((fh - h) / 2 - shift[:, 1] * z), 0, fh - h).astype(int)
+    rate = float(Fraction(sc["facts"]["fps"]))
+    cmds.write_text("".join(f"{(n - 0.5) / rate:.4f} crop@{tag} x {x[n]}, crop@{tag} y {y[n]}"
+                            + (f", rotate@{tag} a {shift[n, 2]:.6f}" if turn else "") + ";\n" for n in range(1, len(x))))
+    rotate = f"rotate@{tag}=a={shift[0, 2]:.6f}:ow={fw}:oh={fh}:bilinear=1," if turn else ""
+    return f"scale={fw}:{fh}:flags=lanczos,setsar=1,format=gbrp16le,sendcmd=f='{cmds}',{rotate}crop@{tag}={w}:{h}:{x[0]}:{y[0]}"
+
+
 def frame_size(scs: list) -> tuple[int, int]:
     h = min(window(sc["facts"], sc["assumed"]["squeeze"])[1] for sc in scs)
     return round(h * ASPECT / 2) * 2, h
@@ -76,26 +94,28 @@ def retime(sc: dict, start: float, dur: float) -> str | None:
 
 
 def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look: grade.Look) -> list[str]:
-    """Filter chains taking camera frames at [src] to the graded, desqueezed 16-bit RGB picture at [tag]."""
+    """Filter chains taking the framed picture at [src] (framing()) to the graded 16-bit RGB picture at [tag]."""
     w, h = size
-    cw, ch = window(sc["facts"], sc["assumed"]["squeeze"])
     lut, halo = grade.write_luts(sc, tmp, tag, look)
     glow, decode, encode = (tmp / n for n in ("glow.cube", "decode.cube", "encode.cube"))
     if not glow.exists():
-        grade.write_glow(tmp, look)  # one look per render, so one glow
-    # The vignette darkens display light by cos^4 of the distance from the centre, the corners by look.vignette stops.
-    vignette = f"vignette=angle={math.acos(2 ** (-look.vignette / 4)):.4f}:eval=init," if look.vignette else ""
+        grade.write_glow(tmp, look)  # one look per render, so one glow and one vignette
+    if look.vignette and not (tmp / "vignette.png").exists():
+        grade.write_vignette(tmp / "vignette.png", size, look)
     spread = h * look.halation_spread / 4
     # The glow is soft, so it is blurred at quarter size: a tight core and a wide skirt, then added as light.
     return [
-        f"[{src}]crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le,split[{tag}p][{tag}s]",
+        f"[{src}]split[{tag}p][{tag}s]",
         f"[{tag}p]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}c]",
         f"[{tag}s]lut3d=file='{halo}',scale={w // 4}:{h // 4}:flags=area,split[{tag}h1][{tag}h2]",
         f"[{tag}h1]gblur=sigma={spread * 0.004:.2f}[{tag}t]",
         f"[{tag}h2]gblur=sigma={spread * 0.014:.2f}[{tag}k]",
         f"[{tag}t][{tag}k]mix=inputs=2:weights=0.6 0.4,lut1d=file='{glow}',scale={w}:{h}:flags=bicubic[{tag}g]",
-        f"[{tag}c][{tag}g]blend=all_mode=addition,{vignette}lut1d=file='{encode}'[{tag}]",
-    ]
+        f"[{tag}c][{tag}g]blend=all_mode=addition[{tag}l]",
+    ] + ([  # the vignette multiplies display light by a 16-bit mask (ffmpeg's vignette filter is 8-bit only)
+        f"movie='{tmp / 'vignette.png'}',format=gbrp16le,loop=loop=-1:size=1[{tag}m]",
+        f"[{tag}l][{tag}m]blend=all_mode=multiply:shortest=1,lut1d=file='{encode}'[{tag}]",
+    ] if look.vignette else [f"[{tag}l]lut1d=file='{encode}'[{tag}]"])
 
 
 def render(edit: Path, name: str | None = None) -> Path:
@@ -116,7 +136,12 @@ def render(edit: Path, name: str | None = None) -> Path:
             # Two decoder threads per input: sixteen 4K inputs at the default thread count would hold many GB of frames.
             cmd += ["-threads", "2", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", str(clip)]
             eased = retime(sc, start, dur.to_seconds()) or ""
-            graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
+            # A retimed focus pull is a still shot, so a shot is retimed or stabilized, never both: the retime then works on
+            # the camera's own frames, and the stabilizer's frame-by-frame path matches the frames it moves.
+            fix = None if eased else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), sc, size)
+            print(f"  {clip.stem}: " + (f"stabilized, zoom {fix['zoom']:.3f}" if fix else "retimed focus pull" if eased else "steady"), flush=True)
+            frame = framing(sc, size, fix, Path(tmp) / f"v{i}.cmd", f"v{i}")
+            graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{frame},tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
             graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}", look)
             inputs += 1
         # The camera's full-range flag must not reach the master: players expect standard (limited) range.
@@ -152,7 +177,8 @@ def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     """One graded frame at the master's full size, as a maximum-quality JPEG."""
     sc = sidecar.read(clip)
     with tempfile.TemporaryDirectory() as tmp:
-        graph = picture("0:v", sc, frame_size([sc]), Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
+        size = frame_size([sc])
+        graph = [f"[0:v]{framing(sc, size, None, Path(tmp), 'x')}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
         subprocess.run([FFMPEG, "-v", "error", "-y", "-threads", "4", "-ss", f"{t:.3f}", "-i", str(clip),
                         "-filter_complex", ";".join(graph), "-map", "[o]", "-frames:v", "1",
                         "-pix_fmt", "yuvj444p", "-q:v", "1", str(out)], check=True)
@@ -166,8 +192,7 @@ if __name__ == "__main__":
     ap.add_argument("frames", nargs="*")
     ap.add_argument("--look", help="comma-separated looks (python -m footage.grade lists them); one output each")
     a = ap.parse_args()
-    # Renders take only what the desktop leaves: idle CPU scheduling (and with it idle disk priority), inherited by ffmpeg.
-    os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+    idle()
     names = a.look.split(",") if a.look else [None]
     if a.stills:
         lib = {p.stem: p for p in library.clips(Path.home() / "Videos/Library")}

@@ -1,0 +1,11 @@
+{
+  "about": "Fujifilm Pro 400H printed on Fujifilm Crystal Archive paper: soft pastels, cool mint greens, airy highlights.",
+  "lut": "fuji-pro-400h_crystal-archive.cube",
+  "exposure": 0.1,
+  "contrast": 1.0,
+  "warmth": -0.05,
+  "black": 0.06,
+  "white": 0.95,
+  "halation": 0.4,
+  "vignette": 0.2
+}

@@ -1,0 +1,10 @@
+{
+  "about": "Fujifilm Superia X-tra 400 printed on Crystal Archive paper: the everyday Fuji snapshot, punchy with green-leaning shadows.",
+  "lut": "fuji-superia-400_crystal-archive.cube",
+  "exposure": -0.05,
+  "contrast": 1.12,
+  "black": 0.05,
+  "white": 0.95,
+  "halation": 0.6,
+  "vignette": 0.3
+}

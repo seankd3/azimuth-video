@@ -15,12 +15,17 @@ selects and timelines read these sidecars, so an AI agent can find shots and bui
 4. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
 5. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
 6. **Recognize people.** It groups faces into people across the whole library. You can add names to `people.json`.
-7. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
+7. **Measure shake.** It follows the camera's motion on every frame and records, second by second, how much the
+   camera shakes beyond its smoothed path. Moving hands and people in front of a locked-off camera don't count.
+8. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
    - each shot gets its own exposure and white-balance correction;
    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
      its warmth, halation around light sources, and lens vignette;
-   - the looks are files in `looks/`: `cinema` (the default), `classic`, `cinestill-800t`, `kodak-gold-200` and
-     `portra-400`, with stronger versions of some. `python -m footage.grade` lists them.
+   - the looks are files in `looks/`: `cinema` (the default), `classic`, `cinestill-800t`, `kodak-gold-200`,
+     `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
+     `python -m footage.grade` lists them;
+   - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
+     most a 6% zoom, so the deliberate move stays and the picture keeps its 16-bit precision.
 
    The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
 
@@ -32,6 +37,7 @@ loudness so cuts can land on the beat.
 
 ```bash
 python -m footage                     # file the inbox, then fill every sidecar section that is missing or out of date
+python -m footage.find hands --size close-up --steady   # find shots; each line shows its steady stretches and focus pulls
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links
@@ -50,6 +56,10 @@ This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Sp
 - LM Studio, serving `qwen/qwen3.5-35b-a3b`, for the descriptions.
 - Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), the pyannote segmentation model and NeMo TitaNet (sherpa-onnx).
 - Parakeet TDT 0.6B v2 in voxtype's model folder.
+- Optional: [Gyroflow](https://github.com/gyroflow/gyroflow) for shots that shake too much for the built-in
+  stabilizer. Since 1.7 it can measure motion from the picture alone (`--optical-correction 100`), and it corrects
+  rolling shutter. For anamorphic footage, give it a lens profile with the squeeze as `input_horizontal_stretch`.
+  Its output (ProRes 422 HQ, 10-bit, the source's size and timing) can replace the clip in a timeline.
 
 ## Site settings
 

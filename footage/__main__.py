@@ -4,13 +4,13 @@ Each pass owns one sidecar section and fills it where it is missing or stale; a 
 """
 import argparse
 import fcntl
-import os
+import importlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import describe, library, people, probe, sidecar
+from . import describe, idle, library, people, probe, sidecar
 
 
 @dataclass
@@ -22,29 +22,14 @@ class Pass:
     available: Callable[[], bool] = lambda: True
 
 
-def _listen(clip, sc):
-    from . import listen  # heavy model imports only when this pass has work
-    return listen.listen(clip, sc)
+def module(name: str):
+    """A pass's module, imported when first used: heavy model imports wait until a pass has work."""
+    return importlib.import_module(f"footage.{name}")
 
 
-def _focus_version():
-    from . import focus
-    return focus.VERSION
-
-
-def _focus(clip, sc):
-    from . import focus
-    return focus.focus(clip, sc)
-
-
-def _measure_version():
-    from . import measure
-    return measure.VERSION
-
-
-def _measure(clip, sc):
-    from . import measure
-    return measure.measure(clip, sc)
+def versioned(section: str, name: str) -> Callable[[dict], bool]:
+    """Stale when the section is missing or was made by another version of its module."""
+    return lambda sc: sc.get(section, {}).get("v") != module(name).VERSION
 
 
 PASSES = [
@@ -52,9 +37,11 @@ PASSES = [
     Pass("description", describe.describe,
          lambda sc: sc["assumed"]["squeeze"] is not None and sc.get("description", {}).get("squeeze_used") != sc["assumed"]["squeeze"],
          2, describe.available),
-    Pass("transcript", _listen, lambda sc: "transcript" not in sc, 1),
-    Pass("measured", _measure, lambda sc: sc.get("measured", {}).get("v") != _measure_version(), 4),
-    Pass("focus", _focus, lambda sc: sc.get("focus", {}).get("v") != _focus_version(), 2),  # reads every frame on the GPU decoder
+    Pass("transcript", lambda clip, sc: module("listen").listen(clip, sc), lambda sc: "transcript" not in sc, 1),
+    Pass("measured", lambda clip, sc: module("measure").measure(clip, sc), versioned("measured", "measure"), 4),
+    # These two read every frame on the GPU decoder.
+    Pass("focus", lambda clip, sc: module("focus").focus(clip, sc), versioned("focus", "focus"), 2),
+    Pass("shake", lambda clip, sc: module("steady").shake(clip, sc), versioned("shake", "steady"), 2),
 ]
 
 
@@ -98,8 +85,7 @@ def main() -> None:
     ap.add_argument("--ingest", type=Path, default=Path.home() / "Videos/Ingest")
     ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
     a = ap.parse_args()
-    # Analysis takes only what the desktop leaves: idle CPU scheduling (and with it idle disk priority), inherited by ffmpeg.
-    os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+    idle()
     a.library.mkdir(parents=True, exist_ok=True)
     with open(a.library / ".lock", "w") as lock:
         try:
