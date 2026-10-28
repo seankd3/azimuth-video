@@ -72,6 +72,19 @@ def sample(lut: np.ndarray, rgb: np.ndarray) -> np.ndarray:
     return out
 
 
+@cache
+def grey_axis(look: Path) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Per-channel curves that make the look's greys neutral: like timing a print, so grey stays grey at every level.
+
+    A print emulation doesn't map grey to grey (this one goes green in the shadows, yellow-green in the highlights).
+    Each output channel is remapped so that, along the grey axis, it equals the grey's luminance; the film's contrast,
+    colour density and colour rendering stay as they are."""
+    x = np.linspace(0, 1, 2048)
+    grey = sample(read_cube(look), np.repeat(x[:, None], 3, axis=1))
+    target = color.luminance(grey)
+    return [(np.maximum.accumulate(grey[:, c]), target) for c in range(3)]
+
+
 def write_cube(path: Path, values: np.ndarray) -> Path:
     with open(path, "w") as f:
         f.write(f"LUT_3D_SIZE {SIZE}\n")
@@ -86,6 +99,7 @@ def write_luts(sc: dict, folder: Path, tag: str, look: Path = LOOK) -> tuple[Pat
     lin = color.to_linear_709(np.stack([r, g, b], axis=-1).reshape(-1, 3), sc["assumed"]) * balance(sc)
     pivot = color.to_acescct(np.full(3, 0.18))[0]
     picture = sample(read_cube(look), pivot + (color.to_acescct(lin) - pivot) * CONTRAST)
+    picture = np.stack([np.interp(picture[:, c], *grey_axis(look)[c]) for c in range(3)], axis=-1)
     if PRINT_WHITE:  # lift only the top of the print toward PRINT_WHITE; mid-tones and blacks stay where the film put them
         white = read_cube(look)[-1, -1, -1].mean()
         s = np.clip((picture - 0.5) / (white - 0.5), 0, 1)
