@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
-VERSION = 1
+VERSION = 2
 W = 1280
 GX, GY = 8, 4
 AGREE = 0.5  # share of cells with corners whose corners must move together for a frame's motion to count
@@ -47,9 +47,11 @@ def motion(clip: Path, sc: dict, start: float, frames: int) -> np.ndarray:
                          stdout=subprocess.PIPE)
     ch, cw = h // GY, W // GX
     centre = np.array([W / 2, h / 2], np.float32)
-    moves, last = [], None
+    cell = lambda pts: np.unique((pts[:, 1] // ch) * GX + pts[:, 0] // cw)
+    moves, last, frames_read = [], None, 0
     while len(b := p.stdout.read(W * h)) == W * h:
         y = np.frombuffer(b, np.uint8).reshape(h, W)
+        frames_read += 1
         if last is not None:
             move = (np.nan,) * 3
             found = [f + np.float32([i * cw, j * ch]) for j in range(GY) for i in range(GX)
@@ -59,53 +61,78 @@ def motion(clip: Path, sc: dict, start: float, frames: int) -> np.ndarray:
                 nxt, ok, _ = cv2.calcOpticalFlowPyrLK(last, y, pts, None, winSize=(21, 21), maxLevel=3)
                 back, ok2, _ = cv2.calcOpticalFlowPyrLK(y, last, nxt, None, winSize=(21, 21), maxLevel=3)
                 good = (ok.ravel() == 1) & (ok2.ravel() == 1) & (np.linalg.norm(back - pts, axis=2).ravel() < 0.3)
-                a0, a1 = pts[good].reshape(-1, 2) - centre, nxt[good].reshape(-1, 2) - centre
+                a0, a1 = pts[good].reshape(-1, 2), nxt[good].reshape(-1, 2)
                 if len(a0) >= 8:
-                    m, inl = cv2.estimateAffinePartial2D(a0, a1, method=cv2.RANSAC, ransacReprojThreshold=0.5)
-                    cell = (a0[:, 1] + h / 2) // ch * GX + (a0[:, 0] + W / 2) // cw
-                    # The motion counts only when the points that agree with it are spread over most of the frame.
-                    if m is not None and len(np.unique(cell[inl.ravel() == 1])) >= AGREE * len(np.unique(cell)):
+                    m, inl = cv2.estimateAffinePartial2D(a0 - centre, a1 - centre, method=cv2.RANSAC, ransacReprojThreshold=0.5)
+                    # The motion counts only when the points that agree with it are spread over most of the cells that had
+                    # corners: corners lost in tracking count against it, so a moving hand can't outvote a blurred background.
+                    if m is not None and len(cell(a0[inl.ravel() == 1])) >= AGREE * len(cell(pts.reshape(-1, 2))):
                         move = (m[0, 2] / W, m[1, 2] / W, float(np.arctan2(m[1, 0], m[0, 0])))
             moves.append(move)
         last = y
-    p.wait()
+    if p.wait() != 0 or frames_read == 0:
+        raise RuntimeError(f"{clip.name}: the decoder read {frames_read} frames and exited with {p.returncode}")
     return np.array(moves).reshape(-1, 3)
 
+
+def path(moves: np.ndarray, width: float) -> np.ndarray:
+    """The camera's path from its frame-to-frame motion: x, y in pixels of a frame `width` wide, and roll (rad)."""
+    return np.vstack([np.zeros(3), np.cumsum(np.nan_to_num(moves), axis=0)]) * [width, width, 1]
+
+
+def correction(path: np.ndarray, fps: float, smooth: float = SMOOTH) -> np.ndarray:
+    """How far to move and turn each frame to put it on the smoothed path: the shake, with its sign reversed."""
+    return gaussian_filter1d(path, smooth * fps, axis=0, mode="nearest") - path
+
+
+def displacement(fix: np.ndarray, edge: float) -> np.ndarray:
+    """How far each frame's shake moves the picture at its sides: the shift, plus the roll times the distance `edge`."""
+    return np.hypot(fix[:, 0], fix[:, 1]) + np.abs(fix[:, 2]) * edge
+
+
 def shake(clip: Path, sc: dict) -> dict:
-    """The clip's shake second by second, in pixels of a 2160-line master: what the camera moved beyond its smoothed path.
+    """The clip's shake second by second, in pixels of a 2160-line 2.39:1 master: how far the camera moved the picture
+    beyond its smoothed path, roll included.
 
     A second where most frames didn't move as one (a crowd, a move past near objects) is None: it can't be told."""
     from fractions import Fraction
+    from .render import ASPECT
     fps = float(Fraction(sc["facts"]["fps"]))
     m = motion(clip, sc, 0, round(sc["facts"]["duration"] * fps))
-    path = np.vstack([np.zeros(3), np.cumsum(np.nan_to_num(m), axis=0)])[:, :2] * 2160 * full_width(sc)
-    left = np.hypot(*(path - gaussian_filter1d(path, SMOOTH * fps, axis=0, mode="nearest")).T)
+    left = displacement(correction(path(m, 2160 * full_width(sc)), fps), 2160 * ASPECT / 2)
     unknown = np.append(False, np.isnan(m).any(axis=1))
-    seconds = [slice(round(s * fps), round((s + 1) * fps)) for s in range(int(np.ceil(len(path) / fps)))]
+    seconds = [slice(round(s * fps), round((s + 1) * fps)) for s in range(int(np.ceil(len(left) / fps)))]
     return {"v": VERSION, "by_second": [None if unknown[s].mean() > 1 - TRUST else round(float(np.sqrt((left[s] ** 2).mean())), 1)
                                         for s in seconds if len(left[s])]}
 
 
-def plan(moves: np.ndarray, fps: float, sc: dict, size: tuple[int, int]) -> dict | None:
-    """Per-frame correction for a shot at the master's size, or None to leave it alone.
+def plan(moves: np.ndarray, fps: float, full: tuple[float, float], size: tuple[int, int]) -> dict | None:
+    """Per-frame correction for a shot, or None to leave it alone. `full` is the whole desqueezed frame at the scale
+    where its 2.39:1 window fills `size`.
 
-    The correction is how far to move the picture (x, y in master pixels) and turn it (rad) on each frame, and the
-    zoom that keeps the edges filled."""
+    The correction is how far to move the picture (x, y in pixels of the master) and turn it (rad) on each frame, and
+    the zoom at which the turned, shifted window still lies inside the frame on every frame."""
     if len(moves) < 2 or np.isnan(moves).any(axis=1).mean() > 1 - TRUST:
         return None
-    w, h = size
-    fw = h * full_width(sc)
-    path = np.vstack([np.zeros(3), np.cumsum(np.nan_to_num(moves), axis=0)]) * [fw, fw, 1]
-    for smooth in (SMOOTH, SMOOTH / 2, SMOOTH / 4, SMOOTH / 8):
-        fix = gaussian_filter1d(path, smooth * fps, axis=0, mode="nearest") - path
-        if smooth == SMOOTH and np.sqrt((fix[:, :2] ** 2).sum(1).mean()) < SHAKE_MIN:
-            return None
-        roll = np.abs(fix[:, 2]).max()
-        # The zoom that keeps a turned, shifted w x h window inside the frame, side to side and up and down.
-        zoom = max(1.0, ((w / 2 + h / 2 * roll + np.abs(fix[:, 0]).max()) / (fw / 2)),
-                   ((h / 2 + w / 2 * roll + np.abs(fix[:, 1]).max()) / (h / 2)))
-        if zoom <= MOST_ZOOM:
-            break
-    zoom = min(zoom, MOST_ZOOM)
-    return {"zoom": float(zoom), "fix": fix, "roll": bool(roll * w / 2 > 0.5), "smooth": smooth}
+    (fw, fh), (w, h) = full, size
+    track = path(moves, fw)
+    if np.sqrt((displacement(correction(track, fps), w / 2) ** 2).mean()) < SHAKE_MIN:
+        return None
+    ww, hh = w + 2, h + 2  # a pixel to spare on each side for rounding
 
+    def zoom(fix: np.ndarray) -> float:
+        x, y, r = np.abs(fix).max(axis=0)
+        if x >= fw / 2 or y >= fh / 2:
+            return np.inf
+        return max(1.0, (ww / 2 + hh / 2 * r) / (fw / 2 - x), (hh / 2 + ww / 2 * r) / (fh / 2 - y))
+
+    for smooth in (SMOOTH, SMOOTH / 2, SMOOTH / 4):
+        fix = correction(track, fps, smooth)
+        if zoom(fix) <= MOST_ZOOM:
+            break
+    else:  # even the lightest smoothing needs more zoom than a subtle stabilization allows: take out as much as fits
+        lo, hi = 0.0, 1.0
+        for _ in range(24):
+            lo, hi = ((lo + hi) / 2, hi) if zoom(fix * (lo + hi) / 2) <= MOST_ZOOM else (lo, (lo + hi) / 2)
+        fix = fix * lo
+    return {"zoom": float(zoom(fix)), "fix": fix, "roll": bool(np.abs(fix[:, 2]).max() * w / 2 > 0.5), "smooth": smooth}

@@ -63,6 +63,12 @@ def window(f: dict, squeeze: float) -> tuple[int, int]:
     return f["width"], round(f["width"] * squeeze / ASPECT / 2) * 2
 
 
+def full_frame(sc: dict, size: tuple[int, int]) -> tuple[float, float]:
+    """The whole recorded frame, desqueezed, at the scale where its 2.39:1 window fills size."""
+    cw, ch = window(sc["facts"], sc["assumed"]["squeeze"])
+    return sc["facts"]["width"] * size[0] / cw, sc["facts"]["height"] * size[1] / ch
+
+
 def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: str) -> str:
     """Filters from camera frames to the desqueezed 2.39:1 picture at size, as 16-bit RGB: still, or stabilized by `fix`."""
     w, h = size
@@ -70,10 +76,11 @@ def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: 
         cw, ch = window(sc["facts"], sc["assumed"]["squeeze"])
         return f"crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le"
     z, shift, turn = fix["zoom"], fix["fix"], fix["roll"]
-    fw, fh = round(h * steady.full_width(sc) * z / 2) * 2, round(h * z / 2) * 2
+    fw, fh = (int(np.ceil(v * z / 2)) * 2 for v in full_frame(sc, size))
     # The window follows the shake (centre minus the correction), so the picture holds where the smoothed path puts it.
-    x = np.clip(np.round((fw - w) / 2 - shift[:, 0] * z), 0, fw - w).astype(int)
-    y = np.clip(np.round((fh - h) / 2 - shift[:, 1] * z), 0, fh - h).astype(int)
+    # The plan's zoom keeps the window inside the frame on every frame, so nothing here is clamped.
+    x = np.round((fw - w) / 2 - shift[:, 0] * z).astype(int)
+    y = np.round((fh - h) / 2 - shift[:, 1] * z).astype(int)
     rate = float(Fraction(sc["facts"]["fps"]))
     cmds.write_text("".join(f"{(n - 0.5) / rate:.4f} crop@{tag} x {x[n]}, crop@{tag} y {y[n]}"
                             + (f", rotate@{tag} a {shift[n, 2]:.6f}" if turn else "") + ";\n" for n in range(1, len(x))))
@@ -138,7 +145,7 @@ def render(edit: Path, name: str | None = None) -> Path:
             eased = retime(sc, start, dur.to_seconds()) or ""
             # A retimed focus pull is a still shot, so a shot is retimed or stabilized, never both: the retime then works on
             # the camera's own frames, and the stabilizer's frame-by-frame path matches the frames it moves.
-            fix = None if eased else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), sc, size)
+            fix = None if eased else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), full_frame(sc, size), size)
             print(f"  {clip.stem}: " + (f"stabilized, zoom {fix['zoom']:.3f}" if fix else "retimed focus pull" if eased else "steady"), flush=True)
             frame = framing(sc, size, fix, Path(tmp) / f"v{i}.cmd", f"v{i}")
             graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{frame},tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")

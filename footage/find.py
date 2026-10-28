@@ -21,13 +21,13 @@ def steady(sc: dict) -> list[tuple[int, int]] | None:
     """Stretches of at least STEADY_SECONDS whole seconds where the camera holds still (or moves smoothly); None if unmeasured."""
     if "shake" not in sc:
         return None
-    runs, start = [], None
+    runs, start, end = [], None, sc["facts"]["duration"]  # the last second may be partial: stretches stop at the clip's end
     for s, px in enumerate(sc["shake"]["by_second"] + [None]):
         if px is not None and px < SHAKE_MIN:
             start = s if start is None else start
         else:
-            if start is not None and s - start >= STEADY_SECONDS:
-                runs.append((start, s))
+            if start is not None and min(s, end) - start >= STEADY_SECONDS:
+                runs.append((start, round(min(s, end), 1)))
             start = None
     return runs
 
