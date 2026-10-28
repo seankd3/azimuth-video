@@ -17,8 +17,10 @@ selects and timelines read these sidecars, so an AI agent can find shots and bui
 6. **Recognize people.** It groups faces into people across the whole library. You can add names to `people.json`.
 7. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
    - each shot gets its own exposure and white-balance correction;
-   - every shot gets the same film look, a spektrafilm simulation of Kodak Vision3 250D printed on Kodak 2393;
-   - halation glows around light sources.
+   - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
+     its warmth, halation around light sources, and lens vignette;
+   - the looks are files in `looks/`: `cinema` (the default), `classic`, `cinestill-800t`, `kodak-gold-200` and
+     `portra-400`, with stronger versions of some. `python -m footage.grade` lists them.
 
    The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
 
@@ -30,12 +32,14 @@ loudness so cuts can land on the beat.
 
 ```bash
 python -m footage                     # file the inbox, then fill every sidecar section that is missing or out of date
-python -m footage.render EDIT.otio    # render a timeline to EDIT.mp4
-python -m footage.render --stills OUT_DIR CLIP@SECONDS ...   # full-resolution graded stills
+python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
+python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links
 ```
 
-The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the library.
+The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the library. A timeline picks its look
+with `metadata["footage"]["look"]`; `--look` overrides it. Runs and renders use idle CPU and disk priority, so they
+take only what the desktop leaves.
 
 ## Requirements
 

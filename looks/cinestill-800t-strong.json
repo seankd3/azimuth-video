@@ -1,0 +1,13 @@
+{
+  "about": "CineStill 800T pushed: colder, darker, and the red glow reaching into the highlights.",
+  "lut": "vision3-500t_2393.cube",
+  "exposure": -0.35,
+  "contrast": 1.15,
+  "warmth": -0.7,
+  "white": 0.95,
+  "halation": 4.0,
+  "halation_tint": [1.0, 0.2, 0.05],
+  "halation_from": 2.0,
+  "halation_spread": 2.2,
+  "vignette": 0.5
+}

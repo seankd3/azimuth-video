@@ -1,6 +1,8 @@
 """Render Library clips through the grade: an OTIO timeline to a 2.39:1 master, or single stills, by one filter graph.
 
-The timeline is the whole edit: video track 1 is picture, every audio track is mixed under it. An audio clip may set
+The timeline is the whole edit: video track 1 is picture, every audio track is mixed under it. The whole edit is
+printed in one look (grade.py): the timeline's `metadata["footage"]["look"]`, or `--look`, or the default; the master
+is written beside the timeline as "EDIT - LOOK.mp4", so one edit can be rendered in several looks. An audio clip may set
 `metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21). Kdenlive and Resolve open the same file.
 The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
 A clip whose media reference is a GeneratorReference of kind "title" is a title card: its `text` on black, fading in
@@ -9,10 +11,12 @@ Stills go through exactly the same picture graph, so an approved still is what t
 A focus pull in a still shot is retimed so the focus eases in and out evenly over the same duration (smooth.py);
 blended frames look like in-between focus. Cut points don't move.
 
-python -m footage.render EDIT.otio
-python -m footage.render --stills OUT_DIR CLIP@SECONDS ...
+python -m footage.render EDIT.otio [--look NAME,NAME...]
+python -m footage.render --stills OUT_DIR [--look NAME,NAME...] CLIP@SECONDS ...
 """
 import argparse
+import math
+import os
 import subprocess
 from fractions import Fraction
 import tempfile
@@ -71,29 +75,33 @@ def retime(sc: dict, start: float, dur: float) -> str | None:
     return smooth.filters(points, start, dur, sc["facts"]["fps"]) if points else None
 
 
-def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look: Path = grade.LOOK) -> list[str]:
+def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look: grade.Look) -> list[str]:
     """Filter chains taking camera frames at [src] to the graded, desqueezed 16-bit RGB picture at [tag]."""
     w, h = size
     cw, ch = window(sc["facts"], sc["assumed"]["squeeze"])
     lut, halo = grade.write_luts(sc, tmp, tag, look)
     glow, decode, encode = (tmp / n for n in ("glow.cube", "decode.cube", "encode.cube"))
     if not glow.exists():
-        grade.write_glow(tmp)
-    # The glow is soft, so it is blurred at quarter size: a tight core and a wide skirt, then tinted and added as light.
+        grade.write_glow(tmp, look)  # one look per render, so one glow
+    # The vignette darkens display light by cos^4 of the distance from the centre, the corners by look.vignette stops.
+    vignette = f"vignette=angle={math.acos(2 ** (-look.vignette / 4)):.4f}:eval=init," if look.vignette else ""
+    spread = h * look.halation_spread / 4
+    # The glow is soft, so it is blurred at quarter size: a tight core and a wide skirt, then added as light.
     return [
         f"[{src}]crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le,split[{tag}p][{tag}s]",
         f"[{tag}p]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}c]",
         f"[{tag}s]lut3d=file='{halo}',scale={w // 4}:{h // 4}:flags=area,split[{tag}h1][{tag}h2]",
-        f"[{tag}h1]gblur=sigma={h * 0.004 / 4:.2f}[{tag}t]",
-        f"[{tag}h2]gblur=sigma={h * 0.014 / 4:.2f}[{tag}k]",
+        f"[{tag}h1]gblur=sigma={spread * 0.004:.2f}[{tag}t]",
+        f"[{tag}h2]gblur=sigma={spread * 0.014:.2f}[{tag}k]",
         f"[{tag}t][{tag}k]mix=inputs=2:weights=0.6 0.4,lut1d=file='{glow}',scale={w}:{h}:flags=bicubic[{tag}g]",
-        f"[{tag}c][{tag}g]blend=all_mode=addition,lut1d=file='{encode}'[{tag}]",
+        f"[{tag}c][{tag}g]blend=all_mode=addition,{vignette}lut1d=file='{encode}'[{tag}]",
     ]
 
 
-def render(edit: Path) -> Path:
+def render(edit: Path, name: str | None = None) -> Path:
     timeline = otio.adapters.read_from_file(str(edit))
-    out = edit.with_suffix(".mp4")
+    look = grade.look(name or timeline.metadata.get("footage", {}).get("look", grade.DEFAULT))
+    out = edit.with_name(f"{edit.stem} - {look.name}.mp4")
     total = timeline.duration().to_seconds()
     pictures = [(p, sidecar.read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
@@ -109,7 +117,7 @@ def render(edit: Path) -> Path:
             cmd += ["-threads", "2", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", str(clip)]
             eased = retime(sc, start, dur.to_seconds()) or ""
             graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
-            graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}")
+            graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}", look)
             inputs += 1
         # The camera's full-range flag must not reach the master: players expect standard (limited) range.
         graph.append("".join(f"[v{i}]" for i in range(len(pictures))) + f"concat=n={len(pictures)}:v=1:a=0,"
@@ -135,12 +143,12 @@ def render(edit: Path) -> Path:
                 "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error",
                 "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
                 "-write_tmcd", "0", "-movflags", "+faststart", str(out)]
-        print(f"  {len(pictures)} shots at {size[0]}x{size[1]}", flush=True)
+        print(f"  {len(pictures)} shots at {size[0]}x{size[1]} in {look.name}", flush=True)
         subprocess.run(cmd, check=True)
     return out
 
 
-def still(clip: Path, t: float, out: Path, look: Path = grade.LOOK) -> Path:
+def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     """One graded frame at the master's full size, as a maximum-quality JPEG."""
     sc = sidecar.read(clip)
     with tempfile.TemporaryDirectory() as tmp:
@@ -156,11 +164,17 @@ if __name__ == "__main__":
     ap.add_argument("edit", nargs="?", type=Path)
     ap.add_argument("--stills", type=Path, help="write stills of CLIP@SECONDS into this folder")
     ap.add_argument("frames", nargs="*")
+    ap.add_argument("--look", help="comma-separated looks (python -m footage.grade lists them); one output each")
     a = ap.parse_args()
+    # Renders take only what the desktop leaves: idle CPU scheduling (and with it idle disk priority), inherited by ffmpeg.
+    os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+    names = a.look.split(",") if a.look else [None]
     if a.stills:
         lib = {p.stem: p for p in library.clips(Path.home() / "Videos/Library")}
         for spec in ([str(a.edit)] if a.edit else []) + a.frames:
-            name, t = spec.split("@")
-            print(still(lib[name], float(t), a.stills / f"{name}.jpg"))
+            clip, t = spec.split("@")
+            for look in (grade.look(n or grade.DEFAULT) for n in names):
+                print(still(lib[clip], float(t), a.stills / f"{clip}-{look.name}.jpg", look))
     else:
-        print(render(a.edit))
+        for name in names:
+            print(render(a.edit, name))

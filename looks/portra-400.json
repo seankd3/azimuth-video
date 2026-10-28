@@ -1,0 +1,10 @@
+{
+  "about": "Kodak Portra 400 printed on Endura paper: gentle contrast, true and flattering skin.",
+  "lut": "portra-400_portra-endura.cube",
+  "exposure": 0.0,
+  "contrast": 1.05,
+  "warmth": 0.1,
+  "black": 0.05,
+  "white": 0.95,
+  "halation": 0.5
+}

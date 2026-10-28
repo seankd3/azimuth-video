@@ -1,0 +1,8 @@
+{
+  "about": "Kodak Vision3 250D printed on 2393, a harder negative and brighter whites, red halation around lights. The default.",
+  "lut": "vision3-250d_2393.cube",
+  "exposure": -0.15,
+  "contrast": 1.12,
+  "white": 0.96,
+  "halation": 1.0
+}

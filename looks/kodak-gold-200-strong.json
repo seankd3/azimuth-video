@@ -1,0 +1,11 @@
+{
+  "about": "Kodak Gold 200 pushed: late-afternoon warmth, milky lifted blacks, a heavier vignette, like an old snapshot.",
+  "lut": "gold-200_ektacolor-edge.cube",
+  "exposure": 0.0,
+  "contrast": 1.15,
+  "warmth": 0.3,
+  "black": 0.09,
+  "white": 0.93,
+  "halation": 1.0,
+  "vignette": 0.6
+}

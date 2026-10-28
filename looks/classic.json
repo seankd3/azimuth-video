@@ -1,0 +1,9 @@
+{
+  "about": "Kodak Vision3 250D printed on 2383, the classic release print: warmer highlights, softer contrast.",
+  "lut": "vision3-250d_2383.cube",
+  "exposure": -0.15,
+  "contrast": 1.05,
+  "white": 0.95,
+  "halation": 0.8,
+  "vignette": 0.25
+}

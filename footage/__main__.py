@@ -4,6 +4,7 @@ Each pass owns one sidecar section and fills it where it is missing or stale; a 
 """
 import argparse
 import fcntl
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,6 +98,8 @@ def main() -> None:
     ap.add_argument("--ingest", type=Path, default=Path.home() / "Videos/Ingest")
     ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
     a = ap.parse_args()
+    # Analysis takes only what the desktop leaves: idle CPU scheduling (and with it idle disk priority), inherited by ffmpeg.
+    os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
     a.library.mkdir(parents=True, exist_ok=True)
     with open(a.library / ".lock", "w") as lock:
         try:

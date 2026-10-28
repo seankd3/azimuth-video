@@ -1,0 +1,13 @@
+{
+  "about": "In the style of CineStill 800T, which is Vision3 500T without its anti-halation backing: cool tungsten balance, a red glow around every light.",
+  "lut": "vision3-500t_2393.cube",
+  "exposure": -0.2,
+  "contrast": 1.08,
+  "warmth": -0.35,
+  "white": 0.95,
+  "halation": 2.5,
+  "halation_tint": [1.0, 0.22, 0.06],
+  "halation_from": 2.5,
+  "halation_spread": 1.6,
+  "vignette": 0.25
+}

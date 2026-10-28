@@ -1,0 +1,11 @@
+{
+  "about": "Kodak Gold 200 printed on Ektacolor paper: warm and golden, rich reds and yellows, soft blacks.",
+  "lut": "gold-200_ektacolor-edge.cube",
+  "exposure": -0.05,
+  "contrast": 1.1,
+  "warmth": 0.1,
+  "black": 0.06,
+  "white": 0.95,
+  "halation": 0.6,
+  "vignette": 0.3
+}
