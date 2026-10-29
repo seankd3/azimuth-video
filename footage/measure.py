@@ -11,9 +11,6 @@ DETAIL = 3200  # width of the frames faces are recognized from
 VERSION = 8  # bump when a measurement changes meaning, so the measure pass redoes every clip
 GATES = (0.4, 0.25, 0.15, 0.08)  # chroma limits the white-balance search narrows through
 MIN_SHARE = 0.01  # least share of the moderately bright pixels a white-balance estimate may rest on
-# Share near the camera's balance at the widest gate below which it was set for very different light. Measured on the
-# library: right balance, least 0.045 (median 0.80); a tungsten preset in daylight, at most 0.013.
-OTHER_LIGHT = 0.02
 
 
 def frames(clip: Path, t: float, f: dict, n: int = 1, squeeze: float = 1.0, w: int = W) -> np.ndarray:
@@ -25,38 +22,27 @@ def frames(clip: Path, t: float, f: dict, n: int = 1, squeeze: float = 1.0, w: i
 
 
 def neutral(lin: np.ndarray) -> dict:
-    """The colour grey records as in these scene-linear frames, where the search started, and what it rests on.
+    """The colour grey records as in these scene-linear frames, and the evidence for it.
 
     The estimate averages moderately bright pixels that are near-neutral once the current estimate is removed (walls,
-    tables, shirts), narrowing as it goes. It starts from the camera's own balance, the one outside witness: under it
-    grey already records as grey, so a shot full of one strong colour can't pass that colour for grey. Only when
-    almost nothing near the camera's balance looks grey at all was the camera set for very different light (a
-    tungsten preset in daylight), and the search starts from the frames' average colour instead. A smaller wrong
-    preset can't be told from a frame full of one colour by its pixels; it shows as weak evidence and is fixed by hand
-    (assumed.neutral_rgb). The evidence is `gate`, the tightest chroma limit the search got through, and `share`, the
-    part of the moderately bright pixels within that limit of the estimate. When nothing looks grey from either start,
-    there is no estimate: "none", and the camera's balance stands."""
+    tables, shirts), narrowing through GATES. It starts from the camera's own balance, the one outside witness: under
+    it grey already records as grey, so a shot full of one strong colour can't pass that colour for grey. The evidence
+    is `gate`, the tightest chroma limit the search got through, and `share`, the part of the moderately bright pixels
+    within that limit of the estimate. When nothing near the camera's balance looks grey (a close-up of one colour, or
+    a camera set for very different light; the pixels can't tell which) there is no estimate: "none", and the camera's
+    balance stands."""
     rgb, yy = lin.reshape(-1, 3), color.luminance(lin).reshape(-1)
     lo, hi = np.percentile(yy, [40, 97])
     band = rgb[(yy > lo) & (yy < hi)]
-    none = {"rgb": np.ones(3), "from": "none", "share": 0.0, "gate": None}
-    if not len(band):
-        return none
-    chroma = lambda n: (lambda c: (c.max(1) - c.min(1)) / np.maximum(c.max(1), 1e-5))(band / n)
-
-    def search(n: np.ndarray) -> dict:
-        found = none
-        for limit in GATES:
-            near = chroma(n) < limit
-            if near.mean() < MIN_SHARE:
-                break
-            n = band[near].mean(0)
-            found = {"rgb": n / n[1], "share": float(near.mean()), "gate": limit}
-        return found
-
-    start = "camera" if (chroma(np.ones(3)) < GATES[0]).mean() >= OTHER_LIGHT else "frame"
-    found = search(np.ones(3) if start == "camera" else band.mean(0))
-    return {**found, "from": start} if found["gate"] else none
+    found, n = {"rgb": np.ones(3), "from": "none", "share": 0.0, "gate": None}, np.ones(3)
+    for limit in GATES:
+        c = band / n
+        near = (c.max(1) - c.min(1)) / np.maximum(c.max(1), 1e-5) < limit
+        if not len(band) or near.mean() < MIN_SHARE:
+            break
+        n = band[near].mean(0)
+        found = {"rgb": n / n[1], "from": "camera", "share": float(near.mean()), "gate": limit}
+    return found
 
 
 def measure(clip: Path, sc: dict) -> dict:
