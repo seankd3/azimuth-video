@@ -41,7 +41,8 @@ def audio(clip: Path) -> np.ndarray:
     """The clip's sound as mono at RATE; nothing for a clip shot without sound."""
     if not any(st["codec_type"] == "audio" for st in probe.ffprobe(clip)["streams"]):
         return np.zeros(0, np.float32)
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(clip), "-vn", "-ac", "1", "-ar", str(RATE), "-f", "f32le", "-"],
+    # -xerror: a damaged track fails the pass (and is retried) instead of passing for silence.
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", str(clip), "-vn", "-ac", "1", "-ar", str(RATE), "-f", "f32le", "-"],
                          capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype=np.float32)
 
