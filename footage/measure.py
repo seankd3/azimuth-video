@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import color, face
+from . import color, face, view
 
 W = 1280  # analysis width, desqueezed so faces have their real shape
 DETAIL = 3200  # width of the frames faces are recognized from
@@ -13,10 +13,10 @@ GATES = (0.4, 0.25, 0.15, 0.08)  # chroma limits the white-balance search narrow
 MIN_SHARE = 0.01  # least share of the moderately bright pixels a white-balance estimate may rest on
 
 
-def frames(clip: Path, t: float, f: dict, n: int = 1, squeeze: float = 1.0, w: int = W) -> np.ndarray:
-    h = round(w * f["height"] / (f["width"] * squeeze) / 2) * 2
+def frames(clip: Path, sc: dict, t: float, n: int = 1, w: int = W) -> np.ndarray:
+    h = view.size(sc, w)[1]
     raw = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.3f}", "-i", str(clip), "-frames:v", str(n),
-                          "-vf", f"scale={w}:{h}", "-pix_fmt", "rgb48le", "-f", "rawvideo", "-"],
+                          "-vf", view.cpu(sc, w), "-pix_fmt", "rgb48le", "-f", "rawvideo", "-"],
                          capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype="<u2").reshape(-1, h, w, 3).astype(np.float32) / 65535
 
@@ -49,7 +49,7 @@ def measure(clip: Path, sc: dict) -> dict:
     f, a = sc["facts"], sc["assumed"]
     n = 6
     times = [round(f["duration"] * (i + 0.5) / n, 2) for i in range(n)]
-    pairs = [frames(clip, t, f, 2, a["squeeze"] or 1.0) for t in times]  # two consecutive frames per sample: the second gives motion
+    pairs = [frames(clip, sc, t, 2) for t in times]  # two consecutive frames per sample: the second gives motion
     code = np.stack([p[0] for p in pairs])
     lin = color.to_linear_709(code, a)
     y = np.clip(color.luminance(lin), 1e-5, None)
@@ -60,7 +60,7 @@ def measure(clip: Path, sc: dict) -> dict:
     lap = c[:, 1:-1, 1:-1] * 4 - c[:, :-2, 1:-1] - c[:, 2:, 1:-1] - c[:, 1:-1, :-2] - c[:, 1:-1, 2:]
     second = color.luminance(color.tone(color.to_linear_709(np.stack([p[-1] for p in pairs]), a)))
     # Every face in every sample frame (who, and how lit), and a summary of the largest: the shot's subject, if any.
-    found = [face.find(frame, color.to_linear_709(frames(clip, t, f, 1, a["squeeze"] or 1.0, DETAIL)[0], a))
+    found = [face.find(frame, color.to_linear_709(frames(clip, sc, t, 1, DETAIL)[0], a))
              for t, frame in zip(times, lin)]
     faces = [{"t": t, **x} for t, frame_faces in zip(times, found) for x in frame_faces]
     largest = [frame_faces[0] for frame_faces in found if frame_faces]

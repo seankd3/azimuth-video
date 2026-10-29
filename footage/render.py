@@ -25,9 +25,8 @@ from pathlib import Path
 import numpy as np
 import opentimelineio as otio
 
-from . import grade, idle, library, sidecar, smooth, steady
+from . import grade, idle, library, sidecar, smooth, steady, view
 
-ASPECT = 2.39
 FADE_IN, FADE_OUT = 0.8, 1.0
 # ffmpeg-gpu (BtbN build) has 10-bit x265; Arch ARM's x265 is 8-bit only, and ffmpeg silently falls back to 8-bit.
 FFMPEG = "ffmpeg-gpu"
@@ -56,27 +55,14 @@ def title(clip: otio.schema.Clip, size: tuple[int, int], rate: str, frames: int,
             f"x=(w-text_w)/2:y=(h-text_h)/2:alpha='{alpha}',trim=end_frame={frames},format=gbrp16le[{tag}]")
 
 
-def window(f: dict, squeeze: float) -> tuple[int, int]:
-    """The centred source region, in recorded pixels, that desqueezes to 2.39:1."""
-    if f["width"] * squeeze / f["height"] >= ASPECT:
-        return round(f["height"] * ASPECT / squeeze / 2) * 2, f["height"]
-    return f["width"], round(f["width"] * squeeze / ASPECT / 2) * 2
-
-
-def full_frame(sc: dict, size: tuple[int, int]) -> tuple[float, float]:
-    """The whole recorded frame, desqueezed, at the scale where its 2.39:1 window fills size."""
-    cw, ch = window(sc["facts"], sc["assumed"]["squeeze"])
-    return sc["facts"]["width"] * size[0] / cw, sc["facts"]["height"] * size[1] / ch
-
-
 def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: str) -> str:
     """Filters from camera frames to the desqueezed 2.39:1 picture at size, as 16-bit RGB: still, or stabilized by `fix`."""
     w, h = size
     if fix is None:
-        cw, ch = window(sc["facts"], sc["assumed"]["squeeze"])
+        cw, ch = view.window(sc)
         return f"crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le"
     z, shift, turn = fix["zoom"], fix["fix"], fix["roll"]
-    fw, fh = (int(np.ceil(v * z / 2)) * 2 for v in full_frame(sc, size))
+    fw, fh = (int(np.ceil(v * z / 2)) * 2 for v in view.full_frame(sc, size))
     # The window follows the shake (centre minus the correction), so the picture holds where the smoothed path puts it.
     # The plan's zoom keeps the window inside the frame on every frame, so nothing here is clamped.
     x = np.round((fw - w) / 2 - shift[:, 0] * z).astype(int)
@@ -86,11 +72,6 @@ def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: 
                             + (f", rotate@{tag} a {shift[n, 2]:.6f}" if turn else "") + ";\n" for n in range(1, len(x))))
     rotate = f"rotate@{tag}=a={shift[0, 2]:.6f}:ow={fw}:oh={fh}:bilinear=1," if turn else ""
     return f"scale={fw}:{fh}:flags=lanczos,setsar=1,format=gbrp16le,sendcmd=f='{cmds}',{rotate}crop@{tag}={w}:{h}:{x[0]}:{y[0]}"
-
-
-def frame_size(scs: list) -> tuple[int, int]:
-    h = min(window(sc["facts"], sc["assumed"]["squeeze"])[1] for sc in scs)
-    return round(h * ASPECT / 2) * 2, h
 
 
 def retime(sc: dict, start: float, dur: float) -> str | None:
@@ -132,7 +113,7 @@ def render(edit: Path, name: str | None = None) -> Path:
     total = timeline.duration().to_seconds()
     pictures = [(p, sidecar.read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
-    size, rate = frame_size(filmed), filmed[0]["facts"]["fps"]
+    size, rate = view.master(filmed), filmed[0]["facts"]["fps"]
     cmd, graph, inputs = [FFMPEG, "-v", "error", "-stats", "-y"], [], 0
     with tempfile.TemporaryDirectory() as tmp:
         for i, ((clip, start, dur, _, item), sc) in enumerate(pictures):
@@ -145,7 +126,7 @@ def render(edit: Path, name: str | None = None) -> Path:
             eased = retime(sc, start, dur.to_seconds()) or ""
             # A retimed focus pull is a still shot, so a shot is retimed or stabilized, never both: the retime then works on
             # the camera's own frames, and the stabilizer's frame-by-frame path matches the frames it moves.
-            fix = None if eased or not steady.handheld(sc) else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), full_frame(sc, size), size)
+            fix = None if eased or not steady.handheld(sc) else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), view.full_frame(sc, size), size)
             print(f"  {clip.stem}: " + (f"stabilized, zoom {fix['zoom']:.3f}" if fix else "retimed focus pull" if eased
                                         else "steady" if steady.handheld(sc) else "on a tripod"), flush=True)
             frame = framing(sc, size, fix, Path(tmp) / f"v{i}.cmd", f"v{i}")
@@ -185,7 +166,7 @@ def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     """One graded frame at the master's full size, as a maximum-quality JPEG."""
     sc = sidecar.read(clip)
     with tempfile.TemporaryDirectory() as tmp:
-        size = frame_size([sc])
+        size = view.master([sc])
         graph = [f"[0:v]{framing(sc, size, None, Path(tmp), 'x')}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
         subprocess.run([FFMPEG, "-v", "error", "-y", "-threads", "4", "-ss", f"{t:.3f}", "-i", str(clip),
                         "-filter_complex", ";".join(graph), "-map", "[o]", "-frames:v", "1",

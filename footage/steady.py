@@ -20,6 +20,8 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
+from . import view
+
 VERSION = 2
 W = 1280
 GX, GY = 8, 4
@@ -38,19 +40,13 @@ def handheld(sc: dict) -> bool:
     return sc["assumed"].get("support") != "tripod"
 
 
-def full_width(sc: dict) -> float:
-    """Width of the whole desqueezed frame, in units of its height."""
-    f = sc["facts"]
-    return f["width"] * sc["assumed"]["squeeze"] / f["height"]
-
-
 def motion(clip: Path, sc: dict, start: float, frames: int) -> np.ndarray:
     """Frame-to-frame camera motion: x, y (in widths of the desqueezed frame) and roll (rad); NaN where cells disagree."""
     import cv2
-    h = round(W / full_width(sc) / 2) * 2
+    h = view.size(sc, W)[1]
     p = subprocess.Popen(["ffmpeg-gpu", "-v", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
                           "-ss", f"{start:.3f}", "-i", str(clip), "-frames:v", str(frames),
-                          "-vf", f"scale_cuda={W}:{h}:format=nv12,hwdownload,format=nv12,format=gray", "-f", "rawvideo", "-"],
+                          "-vf", f"{view.cuda(sc, W)},format=gray", "-f", "rawvideo", "-"],
                          stdout=subprocess.PIPE)
     ch, cw = h // GY, W // GX
     centre = np.array([W / 2, h / 2], np.float32)
@@ -103,10 +99,9 @@ def shake(clip: Path, sc: dict) -> dict:
 
     A second where most frames didn't move as one (a crowd, a move past near objects) is None: it can't be told."""
     from fractions import Fraction
-    from .render import ASPECT
     fps = float(Fraction(sc["facts"]["fps"]))
     m = motion(clip, sc, 0, round(sc["facts"]["duration"] * fps))
-    left = displacement(correction(path(m, 2160 * full_width(sc)), fps), 2160 * ASPECT / 2)
+    left = displacement(correction(path(m, 2160 * view.full_width(sc)), fps), 2160 * view.ASPECT / 2)
     unknown = np.append(False, np.isnan(m).any(axis=1))
     seconds = [slice(round(s * fps), round((s + 1) * fps)) for s in range(int(np.ceil(len(left) / fps)))]
     return {"v": VERSION, "by_second": [None if unknown[s].mean() > 1 - TRUST else round(float(np.sqrt((left[s] ** 2).mean())), 1)

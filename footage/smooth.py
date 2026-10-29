@@ -7,12 +7,14 @@ added up frame to frame); which reads a given pull better varies, so each candid
 frame-to-frame focus speed measured. The smoothest is kept, if it beats the untouched pull.
 """
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d, median_filter
 
-W, H = 640, 210
+from . import focus, view
+
 BLUR = 4  # frames blended per output frame, at BLUR times the frame rate
 MOST_KNOTS = 48  # an ffmpeg expression this deep still parses
 KEEP_IF_BETTER = 0.9  # a retime must cut jitter by at least 10% to replace the original
@@ -78,9 +80,10 @@ def filters(points: list, start: float, dur: float, rate: str) -> str:
             f"tmix=frames={BLUR},framestep={BLUR},setpts=N/({rate})/TB,")
 
 
-def jitter(clip: Path, start: float, n: int, sa: int, sb: int, chain: str) -> float:
-    """Frame-to-frame unevenness of the focus speed through the pull, measured on a small render."""
-    g = (f"[0:v]trim=end_frame={n},setpts=PTS-STARTPTS,scale={W}:{H},{chain}"
+def jitter(clip: Path, sc: dict, start: float, n: int, sa: int, sb: int, chain: str) -> float:
+    """Frame-to-frame unevenness of the focus speed through the pull, measured on a small render read as focus reads."""
+    W, H = view.size(sc, focus.W)
+    g = (f"[0:v]trim=end_frame={n},setpts=PTS-STARTPTS,{view.cpu(sc, focus.W)},{chain}"
          f"tpad=stop_mode=clone:stop={BLUR},trim=end_frame={n},format=gray")
     raw = subprocess.run(["ffmpeg-gpu", "-v", "error", "-ss", f"{start:.3f}", "-i", str(clip), "-filter_complex", g,
                           "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
@@ -92,17 +95,19 @@ def jitter(clip: Path, start: float, n: int, sa: int, sb: int, chain: str) -> fl
     return float(np.sqrt(np.mean((v - trend) ** 2)) / max(trend.mean(), 1e-9))
 
 
-def best(clip: Path, sharp: np.ndarray, a: int, b: int, fps: float, rate: str, duration: float) -> dict | None:
+def best(clip: Path, sc: dict, sharp: np.ndarray, a: int, b: int) -> dict | None:
     """The smoothest retime for the pull at frames a..b of this clip, or None if nothing beats leaving it alone."""
+    rate, duration = sc["facts"]["fps"], sc["facts"]["duration"]
+    fps = float(Fraction(rate))
     start = max(a / fps - 0.6, 0.0)
     n = round((min(b / fps + 0.8, duration - 0.05) - start) * fps)
     sa, sb = round(a - start * fps), round(b - start * fps)
     t = np.arange(a, b + 1) / fps
-    before = jitter(clip, start, n, sa, sb, "")
+    before = jitter(clip, sc, start, n, sa, sb, "")
     tried = []
     for travel in (projected(sharp, a, b), added_up(sharp, a, b)):
         k = knots(t, travel)
-        tried.append((jitter(clip, start, n, sa, sb, filters(k, start, n / fps, rate)), k))
+        tried.append((jitter(clip, sc, start, n, sa, sb, filters(k, start, n / fps, rate)), k))
     after, k = min(tried, key=lambda x: x[0])
     if after > before * KEEP_IF_BETTER:
         return None

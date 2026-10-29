@@ -13,8 +13,10 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import median_filter, uniform_filter1d
 
+from . import view
+
 VERSION = 4
-W, H, GX, GY = 640, 210, 8, 4
+W, GX, GY = 640, 8, 4  # frames are read W pixels wide (smooth.py measures its retimes the same way)
 NET_MIN = 0.45  # mean change in log sharpness per second across regions
 COHERENT = 0.6  # net change over a second / the path it took: one way, not back and forth
 STILL = 1.2  # thumbnail change per frame, above which the camera or subject is moving
@@ -24,12 +26,12 @@ PULL_STILL = 1.0
 STILL_MOTION, STILL_PAN = 0.35, 0.08  # only a pull with nothing else moving is retimed: no subject motion, no pan
 
 
-def grid_sharpness(clip: Path, fps: float, squeeze: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def grid_sharpness(clip: Path, sc: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Log sharpness per region per frame, a coarse thumbnail per frame for motion, and the pan (pixels per frame)."""
     import cv2
-    h = round(W / (squeeze * 4096 / 2160) / 2) * 2 if squeeze else H
+    h = view.size(sc, W)[1]
     p = subprocess.Popen(["ffmpeg-gpu", "-v", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", str(clip),
-                          "-vf", f"scale_cuda={W}:{h}:format=nv12,hwdownload,format=nv12,format=gray", "-f", "rawvideo", "-"],
+                          "-vf", f"{view.cuda(sc, W)},format=gray", "-f", "rawvideo", "-"],
                          stdout=subprocess.PIPE)
     sharp, thumbs, pans, last = [], [], [], None
     window = cv2.createHanningWindow((W, h), cv2.CV_32F)
@@ -111,9 +113,9 @@ def focus(clip: Path, sc: dict) -> dict:
     num, den = map(int, sc["facts"]["fps"].split("/"))
     from . import smooth
     fps = num / den
-    sharp, thumbs, pans = grid_sharpness(clip, fps, sc["assumed"]["squeeze"])
+    sharp, thumbs, pans = grid_sharpness(clip, sc)
     found = pulls(sharp, thumbs, pans, fps)
     for p in found:
         still = p["motion"] <= STILL_MOTION and p["pan"] <= STILL_PAN
-        p["smooth"] = smooth.best(clip, sharp, *p["frames"], fps, sc["facts"]["fps"], sc["facts"]["duration"]) if still else None
+        p["smooth"] = smooth.best(clip, sc, sharp, *p["frames"]) if still else None
     return {"v": VERSION, "pulls": found}

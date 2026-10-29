@@ -6,7 +6,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import config
+from . import config, view
 
 ENDPOINT = "http://127.0.0.1:1234/v1/chat/completions"
 MODEL = "qwen/qwen3.5-35b-a3b"
@@ -58,10 +58,9 @@ def times(duration: float) -> list[float]:
     return [round(duration * (i + 0.5) / n, 2) for i in range(n)]
 
 
-def frame(clip: Path, t: float, squeeze: float, width: int, height: int) -> str:
-    h = round(WIDTH * height / (width * squeeze) / 2) * 2
+def frame(clip: Path, sc: dict, t: float) -> str:
     jpg = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.2f}", "-i", str(clip), "-frames:v", "1",
-                          "-vf", f"scale={WIDTH}:{h},setsar=1", "-q:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "-"],
+                          "-vf", f"{view.cpu(sc, WIDTH)},setsar=1", "-q:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "-"],
                          capture_output=True, check=True).stdout
     return base64.b64encode(jpg).decode()
 
@@ -79,7 +78,7 @@ def describe(clip: Path, sc: dict) -> dict:
     f, squeeze = sc["facts"], sc["assumed"]["squeeze"]
     ts = times(f["duration"])
     with ThreadPoolExecutor(8) as pool:
-        frames = list(pool.map(lambda t: frame(clip, t, squeeze, f["width"], f["height"]), ts))
+        frames = list(pool.map(lambda t: frame(clip, sc, t), ts))
     context = config.load().get("context")
     text = PROMPT.format(n=len(ts), dur=f["duration"], times=", ".join(f"{t:g}" for t in ts),
                          context=f" {context}" if context else "")
