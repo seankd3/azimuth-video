@@ -29,19 +29,19 @@ def neutral(lin: np.ndarray) -> dict:
     it grey already records as grey, so a shot full of one strong colour can't pass that colour for grey. The evidence
     is `gate`, the tightest chroma limit the search got through, and `share`, the part of the moderately bright pixels
     within that limit of the estimate. When nothing near the camera's balance looks grey (a close-up of one colour, or
-    a camera set for very different light; the pixels can't tell which) there is no estimate: "none", and the camera's
-    balance stands."""
+    a camera set for very different light; the pixels can't tell which) there is no estimate: gate None, and the
+    camera's balance stands."""
     rgb, yy = lin.reshape(-1, 3), color.luminance(lin).reshape(-1)
     lo, hi = np.percentile(yy, [40, 97])
     band = rgb[(yy > lo) & (yy < hi)]
-    found, n = {"rgb": np.ones(3), "from": "none", "share": 0.0, "gate": None}, np.ones(3)
+    found, n = {"rgb": np.ones(3), "share": 0.0, "gate": None}, np.ones(3)
     for limit in GATES:
         c = band / n
         near = (c.max(1) - c.min(1)) / np.maximum(c.max(1), 1e-5) < limit
         if not len(band) or near.mean() < MIN_SHARE:
             break
         n = band[near].mean(0)
-        found = {"rgb": n / n[1], "from": "camera", "share": float(near.mean()), "gate": limit}
+        found = {"rgb": n / n[1], "share": float(near.mean()), "gate": limit}
     return found
 
 
@@ -77,7 +77,6 @@ def measure(clip: Path, sc: dict) -> dict:
         "highlights_clipped_pct": round(float((code.max(-1) > 0.985).mean() * 100), 2),
         "shadows_crushed_pct": round(float((y < 0.002).mean() * 100), 2),
         "neutral_rgb": [round(float(v), 3) for v in white["rgb"]],
-        "neutral_from": white["from"],
         "neutral_share": round(white["share"], 3),
         "neutral_gate": white["gate"],
         "sharpness": round(float(lap.var(axis=(1, 2)).mean() * 1e4), 2),

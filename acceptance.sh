@@ -95,7 +95,7 @@ red = rng.uniform(0.1, 0.6, (97500, 1)) * np.array([1.0, 0.22, 0.12])      # a r
 wood = rng.uniform(0.1, 0.6, (100000, 1)) * np.array([1.0, 0.62, 0.32])    # a close-up of one colour, no grey
 cast = 2.0 ** (2.35 * np.array([0.5, 0, -0.5]))                              # a tungsten preset in daylight
 a = neutral(np.concatenate([grey, red]))
-none = lambda n: n['from'] == 'none' and n['gate'] is None and np.allclose(n['rgb'], 1)
+none = lambda n: n['gate'] is None and np.allclose(n['rgb'], 1)
 print('ok' if abs(np.log2(a['rgb'][0] / a['rgb'][2])) < 0.1 and all(map(none, (neutral(wood), neutral(grey * cast), neutral(np.zeros((1000, 3)))))) else 'bad')
 "); }
 check "colour-dominated stays neutral; no grey near the camera's balance means no estimate" '[ "$(wb)" = ok ]'

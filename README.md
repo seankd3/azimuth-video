@@ -82,9 +82,9 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
 - Without a timezone, shooting days follow the system's local time.
 - Without a matching camera rule, a clip's squeeze is unknown. Set it in the `assumed` section of that clip's sidecar.
 - White balance trusts the camera's own balance and corrects only what the frame's near-grey surfaces show.
-  `measured.neutral_from` is "none" when nothing near the camera's balance looks grey: a close-up of one colour, or
-  a camera set for very different light. The evidence is `neutral_gate` (the tightest chroma limit reached) and
-  `neutral_share` (the share of mid-tones within it). To override a clip, set `"neutral_rgb"` in its `assumed`
+  The evidence is `measured.neutral_gate` (the tightest chroma limit reached) and `neutral_share` (the share of
+  mid-tones within it). A gate of null means nothing near the camera's balance looked grey (a close-up of one colour,
+  or a camera set for very different light), so the camera's balance stands. To override a clip, set `"neutral_rgb"` in its `assumed`
   section: `[1, 1, 1]` keeps the camera's balance; any other value is the colour grey records as.
 - A clip shot on a tripod: set `"support": "tripod"` in its `assumed` section. It is then never stabilized, and search
   lists it as steady throughout. The picture alone can't always tell a still camera from a subject that fills the frame.
