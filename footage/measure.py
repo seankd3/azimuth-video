@@ -8,7 +8,7 @@ from . import color, face
 
 W = 1280  # analysis width, desqueezed so faces have their real shape
 DETAIL = 3200  # width of the frames faces are recognized from
-VERSION = 7  # bump when a measurement changes meaning, so the measure pass redoes every clip
+VERSION = 8  # bump when a measurement changes meaning, so the measure pass redoes every clip
 
 
 def frames(clip: Path, t: float, f: dict, n: int = 1, squeeze: float = 1.0, w: int = W) -> np.ndarray:
@@ -28,13 +28,14 @@ def measure(clip: Path, sc: dict) -> dict:
     lin = color.to_linear_709(code, a)
     y = np.clip(color.luminance(lin), 1e-5, None)
     # White balance: the average colour of moderately bright pixels that are near-neutral once the current estimate
-    # is removed (walls, tables, shirts). Re-picking after each correction stops skin and colour from biasing it.
+    # is removed (walls, tables, shirts). The search starts from the camera's own balance, under which grey already
+    # records as grey, and narrows; starting from the frame's average colour let a big red machine pass for grey.
     rgb = lin.reshape(-1, 3)
     yy = y.reshape(-1)
     lo, hi = np.percentile(yy, [40, 97])
     band = rgb[(yy > lo) & (yy < hi)]
-    neutral = band.mean(0)
-    for limit in (0.25, 0.15, 0.08):
+    neutral = np.ones(3)
+    for limit in (0.4, 0.25, 0.15, 0.08):
         c = band / neutral
         chroma = (c.max(1) - c.min(1)) / np.maximum(c.max(1), 1e-5)
         if (chroma < limit).sum() < 500:
