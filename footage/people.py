@@ -95,12 +95,14 @@ def known(path: Path) -> list[dict]:
 
 
 def of(clip: Path, sc: dict) -> dict | None:
-    """The clip's subject (the largest face measured), if they are a known person: id, name and skin level."""
+    """The clip's subject (the largest face measured), if they are one of the people the last build found in this clip:
+    id, name and skin level."""
     subject = sc.get("measured", {}).get("face")
     if not subject:
         return None
     s = unit(subject["print"])
-    p = max(known(clip.parent.parent / "people.json"), key=lambda p: float(unit(p["print"]) @ s), default=None)
+    here = [p for p in known(clip.parent.parent / "people.json") if clip.stem in p["clips"]]
+    p = max(here, key=lambda p: float(unit(p["print"]) @ s), default=None)
     if p is None or float(unit(p["print"]) @ s) < SAME:
         return None
     return {"id": p["id"], "name": p["name"], "skin_stops": p["skin_stops"]}
