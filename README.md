@@ -24,9 +24,10 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 8. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
    - each shot gets its own exposure and white-balance correction;
    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
-     its warmth, halation around light sources, and lens vignette;
-   - the looks are files in `looks/`: `cinema` (the default house look), `classic`, `cinestill-800t`, `kodak-gold-200`,
-     `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
+     its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
+     walls), and lens vignette;
+   - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
+     `kodak-gold-200`, `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
      `python -m footage.grade` lists them;
    - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
      most a 6% zoom, so the deliberate move stays and the picture keeps its 16-bit precision.

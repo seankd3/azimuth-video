@@ -2,6 +2,7 @@
 import numpy as np
 
 VERSION = 1  # bump when decoding or display encoding changes, so everything measured from colour is redone
+CLIP = 0.985  # code value at which the camera's sensor saturates: anything there is light the camera couldn't hold
 
 
 def identity(sc: dict) -> dict:

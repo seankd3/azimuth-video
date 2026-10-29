@@ -4,8 +4,8 @@ A look is a named print, `looks/NAME.json`: a film-print LUT baked by spektrafil
 is printed (contrast, warmth, black and white levels, halation, vignette). One look covers a whole edit, so every shot
 is printed the same way. What varies by shot is only its balance, computed from the sidecar's `measured` section each
 time and never stored: neutralize the measured white balance and bring the shot's average exposure to the look's.
-For each shot two LUTs are written from camera code values: the picture, and the halation source (tinted scene light
-some stops above the shot's average, which the render blurs and adds back over the picture as light).
+For each shot two LUTs are written from camera code values: the picture, and the halation source (light near the
+camera's clipping point, which the render blurs, tints and adds back over the picture as light).
 
 python -m footage.grade  lists the looks.
 """
@@ -38,7 +38,7 @@ class Look:
     white: float | None = None  # display level the print's white is moved to (prints top out near 0.87)
     halation: float = 0.0  # how much light scatters back through the red-sensitive layer
     halation_tint: tuple[float, float, float] = (1.0, 0.32, 0.08)
-    halation_from: float = 3.5  # stops above the shot's average: lamps and speculars glow; white shirts don't
+    halation_from: float = 0.12  # stops below the camera's clipping point at which the glow starts
     halation_spread: float = 1.0  # glow radius relative to the default
     vignette: float = 0.0  # stops darker in the corners, as lens falloff
 
@@ -137,9 +137,11 @@ def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> tuple[Path, Path
     if look.black is not None:
         s = np.clip((0.5 - picture) / (0.5 - black), 0, 1)
         picture = picture + s * s * (look.black - black)
-    # The glow belongs to how bright the scene was, so printing a face shot brighter doesn't make white shirts glow.
-    threshold = 0.18 * 2 ** (look.exposure + look.halation_from + exposure(sc, look)[1])
-    source = np.maximum(color.luminance(lin) - threshold, 0) / HALATION_SCALE
+    # A light is what the camera couldn't hold: the glow comes from light near the sensor's clipping point, so lamps,
+    # speculars and backlit rims glow and a white shirt or wall doesn't, however the shot was exposed or is printed.
+    clip = color.luminance(color.to_linear_709(np.full(3, color.CLIP), sc["assumed"]) * balance(sc, look))
+    near = np.clip(1 + np.log2(np.maximum(color.luminance(lin), 1e-9) / clip) / look.halation_from, 0, 1)
+    source = clip * near * near * (3 - 2 * near) / HALATION_SCALE
     return (write_cube(folder / f"{tag}.cube", picture),
             write_cube(folder / f"{tag}-halation.cube", np.repeat(np.minimum(source, 1)[:, None], 3, axis=1)))
 

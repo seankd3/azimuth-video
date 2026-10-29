@@ -77,7 +77,7 @@ def measure(clip: Path, sc: dict) -> dict:
     return {
         "frames_at": times,
         "exposure_stops": round(float(np.log2(np.exp(np.log(y).mean()) / 0.18)), 2),
-        "highlights_clipped_pct": round(float((code.max(-1) > 0.985).mean() * 100), 2),
+        "highlights_clipped_pct": round(float((code.max(-1) > color.CLIP).mean() * 100), 2),
         "shadows_crushed_pct": round(float((y < 0.002).mean() * 100), 2),
         "neutral_rgb": [round(float(v), 3) for v in white["rgb"]],
         "neutral_share": round(white["share"], 3),
