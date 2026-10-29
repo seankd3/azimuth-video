@@ -6,6 +6,10 @@ and renders graded edits. All the models run on your own machine.
 Each clip gets one JSON sidecar next to it. The sidecar holds everything the toolkit knows about the clip. Search,
 selects and timelines read these sidecars, so an AI agent can find shots and build edits from them.
 
+Each section of a sidecar records an `id`: the code versions, picture geometry, colour decoding, models and settings
+it was made from. When one of those changes, the section is out of date: the next run redoes it, a render that needs
+it stops, and search leaves it out and says how many clips it skipped sections of.
+
 ## What it does
 
 1. **File.** It moves finished clips from an inbox into one folder per shooting day. It never overwrites a file,
@@ -88,7 +92,8 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
   section: `[1, 1, 1]` keeps the camera's balance; any other value is the colour grey records as.
 - A clip shot on a tripod: set `"support": "tripod"` in its `assumed` section. It is then never stabilized, and search
   lists it as steady throughout. The picture alone can't always tell a still camera from a subject that fills the frame.
-- People's names and skin levels live in `people.json` in your library. They never go in this repository.
+- People's names and skin levels live in `people.json` in your library. They never go in this repository. An edit
+  there holds at once: search and render look a clip's person up when they read it.
 
 Your library (clips, sidecars, `people.json`) and your renders stay on your machine. Keep them out of this repository.
 

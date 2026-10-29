@@ -1,6 +1,13 @@
 """Camera colour science in one place: decoding a clip's code values to scene-linear Rec.709, and display encoding."""
 import numpy as np
 
+VERSION = 1  # bump when decoding or display encoding changes, so everything measured from colour is redone
+
+
+def identity(sc: dict) -> dict:
+    """Everything a clip's decoded colour depends on: part of the identity of every section read from colour."""
+    return {"color": VERSION, "log": sc["assumed"]["log"], "gamut": sc["assumed"]["gamut"]}
+
 
 def to_linear_709(code: np.ndarray, assumed: dict) -> np.ndarray:
     """Full-range RGB code values (0..1) to scene-linear Rec.709, where 0.18 is mid grey."""
@@ -28,3 +35,8 @@ def tone(lin: np.ndarray) -> np.ndarray:
     x = np.clip(lin, 0, None) * 0.6
     d = np.clip((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0, 1)
     return d ** (1 / 2.4)
+
+
+def display(lin: np.ndarray) -> np.ndarray:
+    """Scene-linear to 8-bit display RGB: the one picture recognition models see."""
+    return (np.clip(tone(lin), 0, 1) * 255).astype(np.uint8)

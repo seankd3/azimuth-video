@@ -25,11 +25,25 @@ from pathlib import Path
 import numpy as np
 import opentimelineio as otio
 
-from . import grade, idle, library, sidecar, smooth, steady, view
+from . import grade, idle, library, passes, people, sidecar, smooth, steady, view
 
 FADE_IN, FADE_OUT = 0.8, 1.0
+READS = ("measured", "focus")  # the grade reads measured; a focus pull's retime reads focus
 # ffmpeg-gpu (BtbN build) has 10-bit x265; Arch ARM's x265 is 8-bit only, and ffmpeg silently falls back to 8-bit.
 FFMPEG = "ffmpeg-gpu"
+
+
+def read(clip: Path) -> dict:
+    """A clip's sidecar with its person (people.of). A render from anything out of date would not be the approved
+    picture, so it stops instead."""
+    sc = sidecar.read(clip)
+    if sc is None:
+        raise SystemExit(f"{clip.name} has no sidecar: run python -m footage first")
+    sc = passes.fresh(clip, sc)[0]
+    missing = [s for s in READS if s not in sc]
+    if missing:
+        raise SystemExit(f"{clip.name}: {', '.join(missing)} missing or out of date: run python -m footage first")
+    return {**sc, "person": people.of(clip, sc)}
 
 
 def items(track: otio.schema.Track):
@@ -111,7 +125,7 @@ def render(edit: Path, name: str | None = None) -> Path:
     look = grade.look(name or timeline.metadata.get("footage", {}).get("look", grade.DEFAULT))
     out = edit.with_name(f"{edit.stem} - {look.name}.mp4")
     total = timeline.duration().to_seconds()
-    pictures = [(p, sidecar.read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
+    pictures = [(p, read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
     size, rate = view.master(filmed), filmed[0]["facts"]["fps"]
     cmd, graph, inputs = [FFMPEG, "-v", "error", "-stats", "-y"], [], 0
@@ -164,7 +178,7 @@ def render(edit: Path, name: str | None = None) -> Path:
 
 def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     """One graded frame at the master's full size, as a maximum-quality JPEG."""
-    sc = sidecar.read(clip)
+    sc = read(clip)
     with tempfile.TemporaryDirectory() as tmp:
         size = view.master([sc])
         graph = [f"[0:v]{framing(sc, size, None, Path(tmp), 'x')}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]

@@ -1,27 +1,32 @@
 """Faces in a frame: who they are (an identity fingerprint) and how they are lit (lit and shadow cheek, in scene light)."""
 import threading
 from functools import cache
-from pathlib import Path
 
 import numpy as np
 
-from . import color
+from . import color, models
 
-MODELS = Path.home() / ".local/share/footage/models"
+VERSION = 1  # bump when detection, recognition or cheek measurement changes
+YUNET = models.FOLDER / "face_detection_yunet_2023mar.onnx"
+SFACE = models.FOLDER / "face_recognition_sface_2021dec.onnx"
 SMALLEST = 0.08  # faces shorter than this share of the frame are too small to measure or recognize
 ONE_AT_A_TIME = threading.Lock()  # one detector and recognizer are shared, and the input size changes per call
+
+
+def identity() -> dict:
+    return {"face": VERSION, "face_models": models.identity(YUNET, SFACE)}
 
 
 @cache
 def detector():
     import cv2
-    return cv2.FaceDetectorYN.create(str(MODELS / "face_detection_yunet_2023mar.onnx"), "", (320, 320), score_threshold=0.8)
+    return cv2.FaceDetectorYN.create(str(YUNET), "", (320, 320), score_threshold=0.8)
 
 
 @cache
 def recognizer():
     import cv2
-    return cv2.FaceRecognizerSF.create(str(MODELS / "face_recognition_sface_2021dec.onnx"), "")
+    return cv2.FaceRecognizerSF.create(str(SFACE), "")
 
 
 def cheek(lin: np.ndarray, eye, mouth, nose, w: float) -> np.ndarray | None:
@@ -35,20 +40,20 @@ def cheek(lin: np.ndarray, eye, mouth, nose, w: float) -> np.ndarray | None:
     return np.median(lin[y0:y0 + 2 * r, x0:x0 + 2 * r].reshape(-1, 3), axis=0)
 
 
-def display(lin: np.ndarray) -> np.ndarray:
-    return np.ascontiguousarray((np.clip(color.tone(lin), 0, 1) * 255).astype(np.uint8)[..., ::-1])
+def bgr(lin: np.ndarray) -> np.ndarray:
+    return np.ascontiguousarray(color.display(lin)[..., ::-1])  # OpenCV's models take BGR
 
 
 def find(lin: np.ndarray, detail: np.ndarray) -> list[dict]:
     """Faces in one desqueezed scene-linear frame, largest first. `detail` is the same frame at higher resolution,
     so the fingerprint comes from a face big enough to recognize."""
     h, w = lin.shape[:2]
-    bgr, big = display(lin), display(detail)
+    small, big = bgr(lin), bgr(detail)
     scale = big.shape[1] / w
     with ONE_AT_A_TIME:
         d = detector()
         d.setInputSize((w, h))
-        _, found = d.detect(bgr)
+        _, found = d.detect(small)
         found = [f for f in ([] if found is None else found) if f[3] / h >= SMALLEST]
         prints = []
         for f in found:

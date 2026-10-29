@@ -117,11 +117,10 @@ def facts(p: Path) -> dict:
 
 
 def unchanged(p: Path, f: dict) -> bool:
-    """Whether p still holds the bytes its sidecar facts describe: same size and mtime, or else the same hash."""
+    """Whether p still has the size and mtime its sidecar facts recorded. It never hashes, so any reader may ask;
+    library.confirm settles a mismatch by hash."""
     st = p.stat()
-    if st.st_size != f["size"]:
-        return False
-    return st.st_mtime_ns == f.get("mtime_ns") or sha256(p) == f["sha256"]
+    return st.st_size == f["size"] and st.st_mtime_ns == f.get("mtime_ns")
 
 
 def assumed(f: dict) -> dict:

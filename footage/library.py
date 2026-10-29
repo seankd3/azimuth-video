@@ -41,13 +41,26 @@ def scan(library: Path, report: list) -> tuple[dict, dict]:
             sc = sidecar.read(p)
             if sc is None:
                 continue
-            if probe.unchanged(p, sc["facts"]):
+            if confirm(p, sc):
                 by_hash[sc["facts"]["sha256"]] = p
             else:
                 report.append(("bytes differ from its sidecar", p.name, p.parent.name))
         except Exception as e:  # one bad clip or sidecar must not stop the rest
             report.append(("unreadable sidecar or clip", f"{p.parent.name}/{p.name}", str(e)[:160]))
     return by_inode, by_hash
+
+
+def confirm(clip: Path, sc: dict) -> bool:
+    """Whether the clip still holds the bytes its sidecar describes. A clip whose mtime alone moved (copied, touched) is
+    confirmed by its hash, and the new mtime is written back so the cheap check holds again."""
+    f = sc["facts"]
+    if probe.unchanged(clip, f):
+        return True
+    st = clip.stat()
+    if st.st_size != f["size"] or probe.sha256(clip) != f["sha256"]:
+        return False
+    sidecar.write(clip, {**sc, "facts": {**f, "mtime_ns": st.st_mtime_ns}})
+    return True
 
 
 def link_free_name(src: Path, folder: Path) -> Path:

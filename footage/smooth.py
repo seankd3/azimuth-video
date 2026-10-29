@@ -15,6 +15,7 @@ from scipy.ndimage import gaussian_filter1d, median_filter
 
 from . import focus, view
 
+VERSION = 1  # bump when a retime or how it is chosen changes, so focus redoes every clip
 BLUR = 4  # frames blended per output frame, at BLUR times the frame rate
 MOST_KNOTS = 48  # an ffmpeg expression this deep still parses
 KEEP_IF_BETTER = 0.9  # a retime must cut jitter by at least 10% to replace the original

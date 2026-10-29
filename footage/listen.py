@@ -5,11 +5,17 @@ from pathlib import Path
 
 import numpy as np
 
-from . import probe
+from . import models, probe
 
+VERSION = 1  # bump when transcription, diarization or voiceprints change
 PARAKEET = Path.home() / ".local/share/voxtype/models/parakeet-tdt-0.6b-v2"
-MODELS = Path.home() / ".local/share/footage/models"
+TITANET = models.FOLDER / "nemo_en_titanet_small.onnx"
+PYANNOTE = models.FOLDER / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
 RATE = 16000
+
+
+def identity(sc: dict) -> dict:
+    return {"listen": VERSION, "models": models.identity(PARAKEET, TITANET, PYANNOTE)}
 
 
 @cache
@@ -22,7 +28,7 @@ def recognizer():
 def embedder():
     import sherpa_onnx
     return sherpa_onnx.SpeakerEmbeddingExtractor(sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-        model=str(MODELS / "nemo_en_titanet_small.onnx"), num_threads=8))
+        model=str(TITANET), num_threads=8))
 
 
 @cache
@@ -31,8 +37,8 @@ def diarizer():
     return sherpa_onnx.OfflineSpeakerDiarization(sherpa_onnx.OfflineSpeakerDiarizationConfig(
         segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
             pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
-                model=str(MODELS / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx")), num_threads=8),
-        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(MODELS / "nemo_en_titanet_small.onnx"), num_threads=8),
+                model=str(PYANNOTE)), num_threads=8),
+        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(TITANET), num_threads=8),
         clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=0.95),
         min_duration_on=0.3, min_duration_off=0.5))
 
@@ -67,7 +73,7 @@ def voiceprint(a: np.ndarray, turns: list) -> list | None:
 def listen(clip: Path, sc: dict) -> dict:
     a = audio(clip)
     if a.size < RATE:
-        return {"model": "parakeet-tdt-0.6b-v2", "speech_seconds": 0.0, "segments": [], "speakers": []}
+        return {"speech_seconds": 0.0, "segments": [], "speakers": []}
     segments = []
     for r in recognizer().recognize(a, sample_rate=RATE):
         text = r.text.strip()
@@ -88,5 +94,5 @@ def listen(clip: Path, sc: dict) -> dict:
             overlap = {k: sum(max(0.0, min(seg["end"], e) - max(seg["start"], s)) for s, e in ts) for k, ts in by_speaker.items()}
             best = max(overlap, key=overlap.get, default=None)
             seg["speaker"] = f"s{best}" if best is not None and overlap[best] > 0 else None
-    return {"model": "parakeet-tdt-0.6b-v2", "speech_seconds": round(sum(s["end"] - s["start"] for s in segments), 1),
+    return {"speech_seconds": round(sum(s["end"] - s["start"] for s in segments), 1),
             "segments": segments, "speakers": speakers}

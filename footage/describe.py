@@ -1,5 +1,6 @@
 """Describe one filed clip with the local vision model, from desqueezed frames sampled across the take."""
 import base64
+import hashlib
 import json
 import subprocess
 import urllib.request
@@ -7,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import config, view
+
+VERSION = 1  # bump when the prompt, schema or frame sampling changes
 
 ENDPOINT = "http://127.0.0.1:1234/v1/chat/completions"
 MODEL = "qwen/qwen3.5-35b-a3b"
@@ -44,6 +47,12 @@ PROMPT = (
 )
 
 
+def identity(sc: dict) -> dict:
+    """The served model is named, not hashed: LM Studio owns its files."""
+    context = config.load().get("context") or ""
+    return {"describe": VERSION, "model": MODEL, "context": hashlib.sha1(context.encode()).hexdigest()[:12], **view.identity(sc)}
+
+
 def available() -> bool:
     """Whether the local server offers MODEL; without it there is nothing to describe with, so skip quickly."""
     try:
@@ -75,7 +84,7 @@ def valid_moments(moments: list, duration: float) -> list:
 
 
 def describe(clip: Path, sc: dict) -> dict:
-    f, squeeze = sc["facts"], sc["assumed"]["squeeze"]
+    f = sc["facts"]
     ts = times(f["duration"])
     with ThreadPoolExecutor(8) as pool:
         frames = list(pool.map(lambda t: frame(clip, sc, t), ts))
@@ -90,4 +99,4 @@ def describe(clip: Path, sc: dict) -> dict:
     reply = json.load(urllib.request.urlopen(req, timeout=900))
     d = json.loads(reply["choices"][0]["message"]["content"])
     d["moments"] = valid_moments(d["moments"], f["duration"])
-    return {"model": MODEL, "squeeze_used": squeeze, "frames_at": ts, **d}
+    return {"frames_at": ts, **d}

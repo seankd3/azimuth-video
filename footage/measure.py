@@ -13,6 +13,10 @@ GATES = (0.4, 0.25, 0.15, 0.08)  # chroma limits the white-balance search narrow
 MIN_SHARE = 0.01  # least share of the moderately bright pixels a white-balance estimate may rest on
 
 
+def identity(sc: dict) -> dict:
+    return {"measure": VERSION, **face.identity(), **view.identity(sc), **color.identity(sc)}
+
+
 def frames(clip: Path, sc: dict, t: float, n: int = 1, w: int = W) -> np.ndarray:
     h = view.size(sc, w)[1]
     raw = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.3f}", "-i", str(clip), "-frames:v", str(n),
@@ -71,7 +75,6 @@ def measure(clip: Path, sc: dict) -> dict:
         seen = {"in_frames": len(largest), "of": n, "height": med("height"), "key_stops": med("key_stops"),
                 "fill_stops": med("fill_stops"), "print": [round(float(v), 3) for v in fp / np.linalg.norm(fp)]}
     return {
-        "v": VERSION,
         "frames_at": times,
         "exposure_stops": round(float(np.log2(np.exp(np.log(y).mean()) / 0.18)), 2),
         "highlights_clipped_pct": round(float((code.max(-1) > 0.985).mean() * 100), 2),

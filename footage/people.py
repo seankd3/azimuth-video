@@ -3,16 +3,18 @@
 `people.json` beside the day folders lists each person: an id, the clips they're in, a fingerprint, and two things only
 you fill in: a `name`, and `skin_stops`, where their lit cheek should sit (stops above 18% grey). Skin level is a
 judgement, not a measurement: no frame can tell darker skin from underexposure, so the machine never guesses it.
-Entries that share a name are one person. Rebuilding keeps ids, names and skin levels. A clip whose subject is a known
-person gets a `person` section, which exposure reads.
+Entries that share a name are one person. Rebuilding keeps ids, names and skin levels. A clip's subject is looked up
+here when a reader asks (people.of), so an edited name or skin level holds at once.
 """
 import json
 import os
+from functools import cache
 from pathlib import Path
 
 import numpy as np
 
 from . import library, sidecar
+from .passes import current
 
 SAME = 0.363  # SFace cosine similarity at which two faces are the same person (OpenCV's recommended threshold)
 ACROSS = 0.45  # stricter across clips, comparing every member: splitting one person is harmless, merging two is not
@@ -49,7 +51,7 @@ def build(lib: Path, report: list) -> None:
             sc = sidecar.read(clip)
         except ValueError:
             continue
-        if sc and "measured" in sc:
+        if sc and current(sc, "measured"):
             clips[clip] = sc
     found = [(clip, t) for clip, sc in clips.items() for t in tracks(sc["measured"])]
     people = []
@@ -81,14 +83,21 @@ def build(lib: Path, report: list) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps({"people": entries}, indent=1))
     os.rename(tmp, path)
-    # Each clip's subject, if they are a known person.
-    for clip, sc in clips.items():
-        subject = sc["measured"].get("face")
-        person = None
-        if subject:
-            p = max(people, key=lambda p: float(p["print"] @ unit(subject["print"])), default=None)
-            if p is not None and float(p["print"] @ unit(subject["print"])) >= SAME:
-                person = {"id": p["id"], "name": p["name"], "skin_stops": p["skin_stops"]}
-        if sc.get("person") != person:
-            sidecar.write(clip, {**{k: v for k, v in sc.items() if k != "person"}, **({"person": person} if person else {})})
     report.append(("people", f"{len(entries)} people", f"{sum(len(e['clips']) > 1 for e in entries)} in more than one clip"))
+
+
+@cache
+def known(path: Path) -> list[dict]:
+    return json.loads(path.read_text())["people"] if path.exists() else []
+
+
+def of(clip: Path, sc: dict) -> dict | None:
+    """The clip's subject (the largest face measured), if they are a known person: id, name and skin level."""
+    subject = sc.get("measured", {}).get("face")
+    if not subject:
+        return None
+    s = unit(subject["print"])
+    p = max(known(clip.parent.parent / "people.json"), key=lambda p: float(unit(p["print"]) @ s), default=None)
+    if p is None or float(unit(p["print"]) @ s) < SAME:
+        return None
+    return {"id": p["id"], "name": p["name"], "skin_stops": p["skin_stops"]}

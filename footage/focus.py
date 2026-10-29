@@ -26,6 +26,11 @@ PULL_STILL = 1.0
 STILL_MOTION, STILL_PAN = 0.35, 0.08  # only a pull with nothing else moving is retimed: no subject motion, no pan
 
 
+def identity(sc: dict) -> dict:
+    from . import smooth
+    return {"focus": VERSION, "smooth": smooth.VERSION, **view.identity(sc)}
+
+
 def grid_sharpness(clip: Path, sc: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Log sharpness per region per frame, a coarse thumbnail per frame for motion, and the pan (pixels per frame)."""
     import cv2
@@ -118,4 +123,4 @@ def focus(clip: Path, sc: dict) -> dict:
     for p in found:
         still = p["motion"] <= STILL_MOTION and p["pan"] <= STILL_PAN
         p["smooth"] = smooth.best(clip, sc, sharp, *p["frames"]) if still else None
-    return {"v": VERSION, "pulls": found}
+    return {"pulls": found}

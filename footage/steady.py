@@ -33,6 +33,10 @@ SHAKE_MIN = 1.5  # RMS shake, in pixels of the master, below which a shot is lef
 MOST_ZOOM = 1.06
 
 
+def identity(sc: dict) -> dict:
+    return {"steady": VERSION, **view.identity(sc)}
+
+
 def handheld(sc: dict) -> bool:
     """Whether the camera could have shaken. A clip assumed shot on a tripod (`assumed.support`, set by whoever shot it)
     never is: there what moves is the subject or a deliberate move, and the picture can't tell a still camera from a
@@ -104,8 +108,8 @@ def shake(clip: Path, sc: dict) -> dict:
     left = displacement(correction(path(m, 2160 * view.full_width(sc)), fps), 2160 * view.ASPECT / 2)
     unknown = np.append(False, np.isnan(m).any(axis=1))
     seconds = [slice(round(s * fps), round((s + 1) * fps)) for s in range(int(np.ceil(len(left) / fps)))]
-    return {"v": VERSION, "by_second": [None if unknown[s].mean() > 1 - TRUST else round(float(np.sqrt((left[s] ** 2).mean())), 1)
-                                        for s in seconds if len(left[s])]}
+    return {"by_second": [None if unknown[s].mean() > 1 - TRUST else round(float(np.sqrt((left[s] ** 2).mean())), 1)
+                       for s in seconds if len(left[s])]}
 
 
 def plan(moves: np.ndarray, fps: float, full: tuple[float, float], size: tuple[int, int]) -> dict | None:

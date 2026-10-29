@@ -1,48 +1,15 @@
 """python -m footage: file finished clips from the Ingest inbox into the Library, then fill each clip's sidecar.
 
-Each pass owns one sidecar section and fills it where it is missing or stale; a failed clip is retried next run.
+Each pass (passes.py) owns one sidecar section and fills it where it is missing or out of date; a failed clip is
+retried next run.
 """
 import argparse
 import fcntl
-import importlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
-from . import describe, idle, library, people, probe, sidecar
-
-
-@dataclass
-class Pass:
-    section: str
-    run: Callable[[Path, dict], dict]
-    stale: Callable[[dict], bool]
-    workers: int
-    available: Callable[[], bool] = lambda: True
-
-
-def module(name: str):
-    """A pass's module, imported when first used: heavy model imports wait until a pass has work."""
-    return importlib.import_module(f"footage.{name}")
-
-
-def versioned(section: str, name: str) -> Callable[[dict], bool]:
-    """Stale when the section is missing or was made by another version of its module."""
-    return lambda sc: sc.get(section, {}).get("v") != module(name).VERSION
-
-
-PASSES = [
-    # Two requests keep the model busy while the next frames are cut. A changed squeeze means new frames.
-    Pass("description", describe.describe,
-         lambda sc: sc["assumed"]["squeeze"] is not None and sc.get("description", {}).get("squeeze_used") != sc["assumed"]["squeeze"],
-         2, describe.available),
-    Pass("transcript", lambda clip, sc: module("listen").listen(clip, sc), lambda sc: "transcript" not in sc, 1),
-    Pass("measured", lambda clip, sc: module("measure").measure(clip, sc), versioned("measured", "measure"), 4),
-    # These two read every frame on the GPU decoder.
-    Pass("focus", lambda clip, sc: module("focus").focus(clip, sc), versioned("focus", "focus"), 2),
-    Pass("shake", lambda clip, sc: module("steady").shake(clip, sc), versioned("shake", "steady"), 2),
-]
+from . import idle, library, people, probe, sidecar
+from .passes import PASSES, Pass, current
 
 
 def fill(lib: Path, p: Pass, report: list) -> None:
@@ -52,11 +19,11 @@ def fill(lib: Path, p: Pass, report: list) -> None:
             sc = sidecar.read(clip)
             if sc is None:
                 report.append(("no sidecar (filed by hand?)", clip.name, clip.parent))
-            elif not probe.unchanged(clip, sc["facts"]):
+            elif not probe.unchanged(clip, sc["facts"]):  # filing's scan has confirmed a moved mtime by hash
                 report.append((f"no {p.section}: bytes differ from its sidecar", clip.name, clip.parent.name))
             elif p.section == "description" and sc["assumed"]["squeeze"] is None:
                 report.append(("needs squeeze set in its sidecar", clip.name, clip.parent))
-            elif p.stale(sc):
+            elif not current(sc, p.section):
                 todo.append(clip)
         except Exception as e:
             report.append((f"no {p.section}", f"{clip.parent.name}/{clip.name}", str(e)[:160]))
@@ -66,7 +33,7 @@ def fill(lib: Path, p: Pass, report: list) -> None:
 
     def job(clip):
         sc = sidecar.read(clip)  # fresh, so this write keeps every other section
-        return clip, {**sc, p.section: p.run(clip, sc)}
+        return clip, {**sc, p.section: {"id": p.identity(sc), **p.run(clip, sc)}}
 
     with ThreadPoolExecutor(p.workers) as pool:
         jobs = [pool.submit(job, clip) for clip in todo]

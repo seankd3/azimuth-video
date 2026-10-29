@@ -7,6 +7,12 @@ ASPECT = 2.39
 VERSION = 1  # bump when what a picture is changes, so everything measured from pictures is redone
 
 
+def identity(sc: dict) -> dict:
+    """Everything a clip's picture geometry depends on: part of the identity of every section read from pictures."""
+    f = sc["facts"]
+    return {"view": VERSION, "squeeze": sc["assumed"]["squeeze"], "width": f["width"], "height": f["height"]}
+
+
 def squeeze(sc: dict) -> float:
     return sc["assumed"]["squeeze"] or 1.0
 

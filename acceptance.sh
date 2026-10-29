@@ -100,5 +100,9 @@ print('ok' if a['gate'] and abs(np.log2(a['rgb'][0] / a['rgb'][2])) < 0.1 and al
 "); }
 check "colour-dominated stays neutral; no grey near the camera's balance means no estimate" '[ "$(wb)" = ok ]'
 
+echo "13. a clip whose mtime alone moved is confirmed by hash once, and its sidecar takes the new mtime"
+touch $day27/H.MP4; run > $S/touched.txt
+check "confirmed, not reported as changed, mtime written back" '! grep -q "bytes differ" $S/touched.txt && same "$("$PY" -c "import json;print(json.load(open(\"$day27/H.MP4.json\"))[\"facts\"][\"mtime_ns\"])")" "$("$PY" -c "import os;print(os.stat(\"$day27/H.MP4\").st_mtime_ns)")"'
+
 echo; if [ $fail = 0 ]; then echo "ACCEPTANCE PASSED"; else echo "ACCEPTANCE FAILED"; fi
 exit $fail

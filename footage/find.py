@@ -2,16 +2,18 @@
 
 Words match anywhere in what the toolkit knows about a clip: its description, tags, moments, transcript and the
 person's name. Each line shows where the usable parts are: the steady stretches (from the shake pass) and the
-focus pulls, so a shot can be cut straight from the list.
+focus pulls, so a shot can be cut straight from the list. Sections that are out of date are left out of the search,
+and the count of clips that had any is printed after the results.
 
 python -m footage.find hands wire --size close-up --steady
 python -m footage.find --person p01 --json
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from . import library, sidecar
+from . import library, passes, people, sidecar
 from .steady import SHAKE_MIN, handheld
 
 STEADY_SECONDS = 2  # shortest steady stretch worth listing
@@ -81,6 +83,15 @@ if __name__ == "__main__":
     ap.add_argument("--day", help="shooting day, YYYY-MM-DD")
     ap.add_argument("--json", action="store_true", help="full records, for an agent")
     a = ap.parse_args()
-    found = [record(c, sc) for c in library.clips(a.library)
-             if (not a.day or c.parent.name == a.day) and (sc := sidecar.read(c)) and matches(sc, a)]  # folders are days
+    found, behind = [], 0
+    for c in library.clips(a.library):
+        if (a.day and c.parent.name != a.day) or (sc := sidecar.read(c)) is None:  # folders are days
+            continue
+        sc, stale = passes.fresh(c, sc)
+        behind += bool(stale)
+        sc["person"] = people.of(c, sc)
+        if matches(sc, a):
+            found.append(record(c, sc))
     print(json.dumps(found, indent=1) if a.json else "\n".join(map(line, found)) + f"\n{len(found)} clips")
+    if behind:
+        print(f"{behind} clips have out-of-date sections, searched without them: run python -m footage", file=sys.stderr)
