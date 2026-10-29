@@ -12,16 +12,19 @@ import json
 from pathlib import Path
 
 from . import library, sidecar
-from .steady import SHAKE_MIN
+from .steady import SHAKE_MIN, handheld
 
 STEADY_SECONDS = 2  # shortest steady stretch worth listing
 
 
 def steady(sc: dict) -> list[tuple[int, int]] | None:
     """Stretches of at least STEADY_SECONDS whole seconds where the camera holds still (or moves smoothly); None if unmeasured."""
+    end = sc["facts"]["duration"]
+    if not handheld(sc):  # on a tripod the whole clip holds still; any motion measured is the subject's
+        return [(0, end)]
     if "shake" not in sc:
         return None
-    runs, start, end = [], None, sc["facts"]["duration"]  # the last second may be partial: stretches stop at the clip's end
+    runs, start = [], None  # the last second may be partial: stretches stop at the clip's end
     for s, px in enumerate(sc["shake"]["by_second"] + [None]):
         if px is not None and px < SHAKE_MIN:
             start = s if start is None else start

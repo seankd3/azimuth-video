@@ -31,6 +31,13 @@ SHAKE_MIN = 1.5  # RMS shake, in pixels of the master, below which a shot is lef
 MOST_ZOOM = 1.06
 
 
+def handheld(sc: dict) -> bool:
+    """Whether the camera could have shaken. A clip assumed shot on a tripod (`assumed.support`, set by whoever shot it)
+    never is: there what moves is the subject or a deliberate move, and the picture can't tell a still camera from a
+    subject that fills the frame against a background too soft to track."""
+    return sc["assumed"].get("support") != "tripod"
+
+
 def full_width(sc: dict) -> float:
     """Width of the whole desqueezed frame, in units of its height."""
     f = sc["facts"]

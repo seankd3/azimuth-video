@@ -145,8 +145,9 @@ def render(edit: Path, name: str | None = None) -> Path:
             eased = retime(sc, start, dur.to_seconds()) or ""
             # A retimed focus pull is a still shot, so a shot is retimed or stabilized, never both: the retime then works on
             # the camera's own frames, and the stabilizer's frame-by-frame path matches the frames it moves.
-            fix = None if eased else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), full_frame(sc, size), size)
-            print(f"  {clip.stem}: " + (f"stabilized, zoom {fix['zoom']:.3f}" if fix else "retimed focus pull" if eased else "steady"), flush=True)
+            fix = None if eased or not steady.handheld(sc) else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), full_frame(sc, size), size)
+            print(f"  {clip.stem}: " + (f"stabilized, zoom {fix['zoom']:.3f}" if fix else "retimed focus pull" if eased
+                                        else "steady" if steady.handheld(sc) else "on a tripod"), flush=True)
             frame = framing(sc, size, fix, Path(tmp) / f"v{i}.cmd", f"v{i}")
             graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{frame},tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
             graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}", look)
