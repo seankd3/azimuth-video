@@ -3,8 +3,9 @@
 `people.json` beside the day folders lists each person: an id, the clips they're in, a fingerprint, and two things only
 you fill in: a `name`, and `skin_stops`, where their lit cheek should sit (stops above 18% grey). Skin level is a
 judgement, not a measurement: no frame can tell darker skin from underexposure, so the machine never guesses it.
-Entries that share a name are one person. Rebuilding keeps ids, names and skin levels. A clip's subject is looked up
-here when a reader asks (people.of), so an edited name or skin level holds at once.
+Entries that share a name are one person. Rebuilding keeps ids, names and skin levels, and a person you named or gave
+a skin level stays listed while none of their clips is measured, so what you wrote is never lost. A clip's subject is
+looked up here when a reader asks (people.of), so an edited name or skin level holds at once.
 """
 import json
 import os
@@ -14,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from . import library, sidecar
-from .passes import current
+from .passes import fresh
 
 SAME = 0.363  # SFace cosine similarity at which two faces are the same person (OpenCV's recommended threshold)
 ACROSS = 0.45  # stricter across clips, comparing every member: splitting one person is harmless, merging two is not
@@ -51,7 +52,7 @@ def build(lib: Path, report: list) -> None:
             sc = sidecar.read(clip)
         except ValueError:
             continue
-        if sc and current(sc, "measured"):
+        if sc and "measured" in fresh(clip, sc)[0]:
             clips[clip] = sc
     found = [(clip, t) for clip, sc in clips.items() for t in tracks(sc["measured"])]
     people = []
@@ -79,7 +80,9 @@ def build(lib: Path, report: list) -> None:
         p["skin_stops"] = next((q["skin_stops"] for q in people if q["skin_stops"] is not None and p["name"]
                                 and q["name"] == p["name"]), p["skin_stops"])
     entries = [{"id": p["id"], "name": p["name"], "skin_stops": p["skin_stops"], "clips": p["clips"],
-                "print": [round(float(v), 3) for v in p["print"]]} for p in sorted(people, key=lambda p: p["id"])]
+                "print": [round(float(v), 3) for v in p["print"]]} for p in people]
+    entries += [{**k, "clips": []} for k in known if k["id"] not in used and (k.get("name") or k.get("skin_stops") is not None)]
+    entries.sort(key=lambda e: e["id"])
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps({"people": entries}, indent=1))
     os.rename(tmp, path)

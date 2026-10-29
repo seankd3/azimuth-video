@@ -32,16 +32,22 @@ def fill(lib: Path, p: Pass, report: list) -> None:
         return
 
     def job(clip):
-        sc = sidecar.read(clip)  # fresh, so this write keeps every other section
-        return clip, {**sc, p.section: {"id": p.identity(sc), **p.run(clip, sc)}}
+        sc = sidecar.read(clip)
+        return clip, p.identity(sc), p.run(clip, sc)
 
     with ThreadPoolExecutor(p.workers) as pool:
         jobs = [pool.submit(job, clip) for clip in todo]
         for i, done in enumerate(as_completed(jobs), 1):
             try:
-                clip, sc = done.result()
-                sidecar.write(clip, sc)
-                report.append((p.section, clip.name, clip.parent.name))
+                clip, made_from, section = done.result()
+                # Written into the sidecar as it is now, so an edit made during the pass stays; a result whose inputs
+                # changed meanwhile is dropped, and the next run redoes it.
+                sc = sidecar.read(clip)
+                if sc is None or not probe.unchanged(clip, sc["facts"]) or p.identity(sc) != made_from:
+                    report.append((f"no {p.section}: its inputs changed during the pass", clip.name, clip.parent.name))
+                else:
+                    sidecar.write(clip, {**sc, p.section: {"id": made_from, **section}})
+                    report.append((p.section, clip.name, clip.parent.name))
             except Exception as e:  # the clip keeps its gap and the next run retries it
                 report.append((f"{p.section} failed", "", repr(e)[:200]))
             print(f"  {p.section} {i}/{len(todo)}", flush=True)
