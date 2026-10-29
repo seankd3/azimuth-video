@@ -85,5 +85,24 @@ r = []; m.fill(Path('$S/lib'), m.PASSES[0], r)" > $S/describe.txt 2>&1); chmod 6
 check "J filed despite four bad sidecars" '[ -f $day27/J.MP4.json ]'
 check "the bad description is reported, not silently skipped" 'grep -q "D.MP4" $S/filing.txt'
 
+echo "12. white balance: a frame full of one strong colour keeps its grey; a camera set for other light is recovered"
+wb() { (cd "$HERE" && "$PY" -c "
+import numpy as np
+from footage.measure import neutral
+rng = np.random.default_rng(0)
+grey = rng.uniform(0.1, 0.6, (30000, 1)) * np.ones(3)                       # walls and metal, recorded grey
+red = rng.uniform(0.1, 0.6, (70000, 1)) * np.array([1.0, 0.22, 0.12])      # a red machine filling the frame
+cast = 2.0 ** (2.35 * np.array([0.5, 0, -0.5]))                              # a tungsten preset in daylight
+blue = rng.uniform(0.1, 0.6, (70000, 1)) * np.array([0.15, 0.3, 1.0])
+a = neutral(np.concatenate([grey, red]))
+b = neutral(grey * cast)
+c = neutral(np.concatenate([red, blue]))                                     # nothing grey at all
+d = neutral(np.zeros((1000, 3)))                                             # black
+rb = lambda n: abs(np.log2(n['rgb'][0] / n['rgb'][2]))
+none = lambda n: n['from'] == 'none' and n['gate'] is None and np.allclose(n['rgb'], 1)
+print('ok' if rb(a) < 0.1 and abs(np.log2(b['rgb'][0] / b['rgb'][2]) - 2.35) < 0.1 and b['from'] == 'frame' and none(c) and none(d) else ('bad', a, b, c, d))
+"); }
+check "colour-dominated stays neutral, wrong preset recovered, no grey means no estimate" '[ "$(wb)" = ok ]'
+
 echo; if [ $fail = 0 ]; then echo "ACCEPTANCE PASSED"; else echo "ACCEPTANCE FAILED"; fi
 exit $fail

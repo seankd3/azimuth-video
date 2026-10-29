@@ -72,7 +72,7 @@ def exposure(sc: dict, look: Look) -> tuple[float, float]:
 
 def balance(sc: dict, look: Look) -> np.ndarray:
     """Per-channel gain in scene-linear Rec.709: white balance to the look's warmth, times exposure."""
-    neutral = np.array(sc["measured"]["neutral_rgb"])
+    neutral = np.array(sc["assumed"].get("neutral_rgb") or sc["measured"]["neutral_rgb"])  # a hand-set neutral wins
     wb = neutral[1] / neutral * 2.0 ** (look.warmth * np.array([0.5, 0, -0.5]))
     wb /= color.luminance(wb)  # white balance alone must not change brightness
     return wb * 2.0 ** sum(exposure(sc, look))

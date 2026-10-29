@@ -81,6 +81,8 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
 
 - Without a timezone, shooting days follow the system's local time.
 - Without a matching camera rule, a clip's squeeze is unknown. Set it in the `assumed` section of that clip's sidecar.
+- A clip whose white balance the measurement gets wrong (see `measured.neutral_from` and `neutral_share`): set
+  `"neutral_rgb": [r, g, b]`, the colour grey records as, in its `assumed` section.
 - A clip shot on a tripod: set `"support": "tripod"` in its `assumed` section. It is then never stabilized, and search
   lists it as steady throughout. The picture alone can't always tell a still camera from a subject that fills the frame.
 - People's names and skin levels live in `people.json` in your library. They never go in this repository.
