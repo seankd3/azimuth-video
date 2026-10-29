@@ -64,8 +64,9 @@ This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Sp
 - Python 3.12 with numpy, scipy, colour-science, opentimelineio, opencv-python-headless, onnx-asr and sherpa-onnx.
 - `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC and 10-bit x265 (for example, a BtbN build).
 - LM Studio, serving `qwen/qwen3.5-35b-a3b`, for the descriptions.
-- Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), the pyannote segmentation model and NeMo TitaNet (sherpa-onnx).
-- Parakeet TDT 0.6B v2 in voxtype's model folder.
+- Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), the pyannote segmentation model and NeMo
+  TitaNet (sherpa-onnx), and Parakeet TDT 0.6B v2. Keep the folder read-only (`chmod -R a-w`): a section is identified
+  by its models' file names and sizes, so a new model or version goes in under a new name, never over an old file.
 - Optional: [Gyroflow](https://github.com/gyroflow/gyroflow) for shots that shake too much for the built-in
   stabilizer. Since 1.7 it can measure motion from the picture alone (`--optical-correction 100`), and it corrects
   rolling shutter. For anamorphic footage, give it a lens profile with the squeeze as `input_horizontal_stretch`.

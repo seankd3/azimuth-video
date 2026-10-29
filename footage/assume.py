@@ -22,11 +22,11 @@ def value(text: str):
 
 
 def targets(lib: Path, names: list[str]) -> list[Path]:
-    """Clips by shooting day, by DAY/FILE, or by file name or stem when that names exactly one clip."""
+    """Clips by shooting day, else by DAY/FILE, or by file name or stem when that names exactly one clip."""
     every, out = library.clips(lib), []
     for n in names:
-        found = [c for c in every if n in (c.parent.name, library.name_of(c), c.name, c.stem)]
-        if not found or (len(found) > 1 and n != found[0].parent.name):
+        found = [c for c in every if c.parent.name == n] or [c for c in every if n in (library.name_of(c), c.name, c.stem)]
+        if len(found) != 1 and not (found and found[0].parent.name == n):
             raise SystemExit(f"{n}: {'no clip' if not found else 'more than one clip; use DAY/FILE'}")
         out += found
     return out

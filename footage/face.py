@@ -20,14 +20,12 @@ def identity() -> dict:
 @cache
 def detector():
     import cv2
-    models.loading(YUNET, SFACE)
     return cv2.FaceDetectorYN.create(str(YUNET), "", (320, 320), score_threshold=0.8)
 
 
 @cache
 def recognizer():
     import cv2
-    models.loading(YUNET, SFACE)
     return cv2.FaceRecognizerSF.create(str(SFACE), "")
 
 
