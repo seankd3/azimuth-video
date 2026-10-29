@@ -30,6 +30,11 @@ def clips(library: Path) -> list[Path]:
     return sorted(p for p in library.glob("*/*") if probe.is_video(p))
 
 
+def name_of(clip: Path) -> str:
+    """A clip's name within the Library, DAY/FILE: unique, where a file name alone may repeat across days."""
+    return f"{clip.parent.name}/{clip.name}"
+
+
 def scan(library: Path, report: list) -> tuple[dict, dict]:
     """Library clips by inode (to finish interrupted publishes) and by content hash (to spot duplicates).
     Only a clip whose bytes still match its sidecar counts as holding that content."""
@@ -59,7 +64,8 @@ def confirm(clip: Path, sc: dict) -> bool:
     st = clip.stat()
     if st.st_size != f["size"] or probe.sha256(clip) != f["sha256"]:
         return False
-    sidecar.write(clip, {**sc, "facts": {**f, "mtime_ns": st.st_mtime_ns}})
+    sidecar.update(clip, lambda now: {**now, "facts": {**now["facts"], "mtime_ns": st.st_mtime_ns}}
+                   if now and now["facts"]["sha256"] == f["sha256"] else None)
     return True
 
 

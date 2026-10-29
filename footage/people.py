@@ -75,7 +75,7 @@ def build(lib: Path, report: list) -> None:
             taken = {k["id"] for k in known} | {q.get("id") for q in people}
             p["id"], p["name"], p["skin_stops"] = next(f"p{i:02d}" for i in range(1, 999) if f"p{i:02d}" not in taken), None, None
         used.add(p["id"])
-        p["clips"] = sorted({clip.stem for clip, _ in p["tracks"]})
+        p["clips"] = sorted({library.name_of(clip) for clip, _ in p["tracks"]})
     for p in people:  # a skin level given to one entry of a named person holds for all of them
         p["skin_stops"] = next((q["skin_stops"] for q in people if q["skin_stops"] is not None and p["name"]
                                 and q["name"] == p["name"]), p["skin_stops"])
@@ -101,7 +101,7 @@ def of(clip: Path, sc: dict) -> dict | None:
     if not subject:
         return None
     s = unit(subject["print"])
-    here = [p for p in known(clip.parent.parent / "people.json") if clip.stem in p["clips"]]
+    here = [p for p in known(clip.parent.parent / "people.json") if library.name_of(clip) in p["clips"]]
     p = max(here, key=lambda p: float(unit(p["print"]) @ s), default=None)
     if p is None or float(unit(p["print"]) @ s) < SAME:
         return None

@@ -21,12 +21,14 @@ def identity(sc: dict) -> dict:
 @cache
 def recognizer():
     import onnx_asr
+    models.loading(PARAKEET, TITANET, PYANNOTE)
     return onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v2", str(PARAKEET)).with_vad(onnx_asr.load_vad("silero")).with_timestamps()
 
 
 @cache
 def embedder():
     import sherpa_onnx
+    models.loading(PARAKEET, TITANET, PYANNOTE)
     return sherpa_onnx.SpeakerEmbeddingExtractor(sherpa_onnx.SpeakerEmbeddingExtractorConfig(
         model=str(TITANET), num_threads=8))
 
@@ -34,6 +36,7 @@ def embedder():
 @cache
 def diarizer():
     import sherpa_onnx
+    models.loading(PARAKEET, TITANET, PYANNOTE)
     return sherpa_onnx.OfflineSpeakerDiarization(sherpa_onnx.OfflineSpeakerDiarizationConfig(
         segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
             pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(

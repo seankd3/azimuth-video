@@ -130,4 +130,4 @@ def assumed(f: dict) -> dict:
         if (f["camera"] or "").startswith(rule["model_prefix"]):
             return {"squeeze": rule.get("squeeze"), "log": rule.get("log"), "gamut": rule.get("gamut"),
                     "by": f"camera rule: {rule['model_prefix']}"}
-    return {"squeeze": None, "log": None, "gamut": None, "by": "no camera rule: set squeeze by hand"}
+    return {"squeeze": None, "log": None, "gamut": None, "by": "no camera rule: set squeeze with python -m footage.assume"}

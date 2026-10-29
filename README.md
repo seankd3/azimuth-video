@@ -44,6 +44,7 @@ python -m footage                     # file the inbox, then fill every sidecar 
 python -m footage.find hands --size close-up --steady   # find shots; each line shows its steady stretches and focus pulls
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
+python -m footage.assume 2026-10-29 support=tripod   # set what the file doesn't record, for clips or whole days
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links
 ```
 
@@ -84,13 +85,14 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
 ```
 
 - Without a timezone, shooting days follow the system's local time.
-- Without a matching camera rule, a clip's squeeze is unknown. Set it in the `assumed` section of that clip's sidecar.
+- Without a matching camera rule, a clip's squeeze is unknown. Set it with `python -m footage.assume CLIP squeeze=1.6`.
+  Change sidecars through `footage.assume` rather than by hand: it waits for any write in progress, so nothing is lost.
 - White balance trusts the camera's own balance and corrects only what the frame's near-grey surfaces show.
   The evidence is `measured.neutral_gate` (the tightest chroma limit reached) and `neutral_share` (the share of
   mid-tones within it). A gate of null means nothing near the camera's balance looked grey (a close-up of one colour,
-  or a camera set for very different light), so the camera's balance stands. To override a clip, set `"neutral_rgb"` in its `assumed`
-  section: `[1, 1, 1]` keeps the camera's balance; any other value is the colour grey records as.
-- A clip shot on a tripod: set `"support": "tripod"` in its `assumed` section. It is then never stabilized, and search
+  or a camera set for very different light), so the camera's balance stands. To override a clip: `python -m footage.assume CLIP neutral_rgb=[1,1,1]`
+  keeps the camera's balance; any other value is the colour grey records as, and `null` goes back to the measured one.
+- A clip shot on a tripod: `python -m footage.assume CLIP support=tripod`. It is then never stabilized, and search
   lists it as steady throughout. The picture alone can't always tell a still camera from a subject that fills the frame.
 - People's names and skin levels live in `people.json` in your library. They never go in this repository. An edit
   there holds at once: search and render look a clip's person up when they read it.

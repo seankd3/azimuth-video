@@ -1,7 +1,9 @@
 """One JSON file beside each clip, holding everything known about it: facts, assumptions, description."""
+import fcntl
 import json
 import os
 from pathlib import Path
+from typing import Callable
 
 VERSION = 1
 
@@ -42,6 +44,21 @@ def write(media: Path, data: dict) -> None:
         os.fsync(f.fileno())
     os.rename(tmp, final)
     sync_dir(final.parent)
+
+
+def update(media: Path, change: Callable[[dict | None], dict | None]) -> dict | None:
+    """Change a clip's sidecar as one step: `change` gets the sidecar as it is now and returns the new one, or None to
+    leave it. Every change to an existing sidecar goes through here, under a lock on its folder, so no writer's edit is
+    lost between another writer's read and its write."""
+    fd = os.open(media.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        new = change(read(media))
+        if new is not None:
+            write(media, new)
+        return new
+    finally:
+        os.close(fd)  # closing releases the lock
 
 
 def sync_dir(folder: Path) -> None:

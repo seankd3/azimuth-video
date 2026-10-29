@@ -9,13 +9,21 @@ from pathlib import Path
 FOLDER = Path.home() / ".local/share/footage/models"
 
 
-@cache
-def identity(*paths: Path) -> dict:
-    """Name and size of each model file; a folder stands for every file in it. Read once per process, as the models
-    themselves are loaded once, so a run stamps the files it loaded."""
+def sizes(*paths: Path) -> dict:
+    """Name and size of each model file; a folder stands for every file in it."""
     out = {}
     for p in paths:
         for f in [p] if p.is_file() else sorted(p.rglob("*")):
             if f.is_file():
                 out[str(f.relative_to(p.parent))] = f.stat().st_size
     return out
+
+
+identity = cache(sizes)  # read once per process: what this run's sections are stamped with
+
+
+def loading(*paths: Path) -> None:
+    """Call before loading a model: the files must still be the ones this run identified, so every section is
+    stamped with the model that made it. A model replaced mid-run fails the pass, and the next run starts over."""
+    if sizes(*paths) != identity(*paths):
+        raise RuntimeError("model files changed during this run")

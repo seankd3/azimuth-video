@@ -42,12 +42,11 @@ def fill(lib: Path, p: Pass, report: list) -> None:
                 clip, made_from, section = done.result()
                 # Written into the sidecar as it is now, so an edit made during the pass stays; a result whose inputs
                 # changed meanwhile is dropped, and the next run redoes it.
-                sc = sidecar.read(clip)
-                if sc is None or not probe.unchanged(clip, sc["facts"]) or p.identity(sc) != made_from:
-                    report.append((f"no {p.section}: its inputs changed during the pass", clip.name, clip.parent.name))
-                else:
-                    sidecar.write(clip, {**sc, p.section: {"id": made_from, **section}})
+                same = lambda sc: sc is not None and probe.unchanged(clip, sc["facts"]) and p.identity(sc) == made_from
+                if sidecar.update(clip, lambda sc: {**sc, p.section: {"id": made_from, **section}} if same(sc) else None):
                     report.append((p.section, clip.name, clip.parent.name))
+                else:
+                    report.append((f"no {p.section}: its inputs changed during the pass", clip.name, clip.parent.name))
             except Exception as e:  # the clip keeps its gap and the next run retries it
                 report.append((f"{p.section} failed", "", repr(e)[:200]))
             print(f"  {p.section} {i}/{len(todo)}", flush=True)
