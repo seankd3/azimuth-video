@@ -4,8 +4,8 @@ A look is a named print, `looks/NAME.json`: a film-print LUT baked by spektrafil
 is printed (contrast, warmth, black and white levels, halation, vignette). One look covers a whole edit, so every shot
 is printed the same way. What varies by shot is only its balance, computed from the sidecar's `measured` section each
 time and never stored: neutralize the measured white balance and bring the shot's average exposure to the look's.
-For each shot two LUTs are written from camera code values: the picture, and the halation source (light near the
-camera's clipping point, which the render blurs, tints and adds back over the picture as light).
+For each shot the picture LUT takes camera code values to the print; the halation LUTs take them to how close each
+pixel came to clipping, which the render blurs, tints and adds back over the picture as light (write_halation).
 
 python -m footage.grade  lists the looks.
 """
@@ -23,7 +23,6 @@ DEFAULT = config.load().get("look", "cinema")  # the house look: a timeline's ow
 SIZE = 33
 FACE_SHOT = 0.2  # a face at least this share of the frame height, in at least half the samples, makes a face shot
 FACE_LIFT = 1.0  # most a face shot's exposure moves to put its person at their skin level
-HALATION_SCALE = 64  # the glow source is stored as light / 64 so 16 bits hold it
 
 
 @dataclass(frozen=True)
@@ -120,8 +119,8 @@ def write_cube(path: Path, values: np.ndarray) -> Path:
     return path
 
 
-def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> tuple[Path, Path]:
-    """This shot's picture LUT and halation-source LUT, both taking the camera's code values."""
+def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> Path:
+    """This shot's picture LUT, taking the camera's code values."""
     grid = np.linspace(0, 1, SIZE)
     b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")  # .cube order: red changes fastest
     lin = color.to_linear_709(np.stack([r, g, b], axis=-1).reshape(-1, 3), sc["assumed"]) * balance(sc, look)
@@ -137,30 +136,48 @@ def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> tuple[Path, Path
     if look.black is not None:
         s = np.clip((0.5 - picture) / (0.5 - black), 0, 1)
         picture = picture + s * s * (look.black - black)
-    # A light is what the camera couldn't hold: the glow comes from light near the sensor's clipping point, so lamps,
-    # speculars and backlit rims glow and a white shirt or wall doesn't, however the shot was exposed or is printed.
-    clip = color.luminance(color.to_linear_709(np.full(3, color.CLIP), sc["assumed"]) * balance(sc, look))
-    near = np.clip(1 + np.log2(np.maximum(color.luminance(lin), 1e-9) / clip) / look.halation_from, 0, 1)
-    source = clip * near * near * (3 - 2 * near) / HALATION_SCALE
-    return (write_cube(folder / f"{tag}.cube", picture),
-            write_cube(folder / f"{tag}-halation.cube", np.repeat(np.minimum(source, 1)[:, None], 3, axis=1)))
+    return write_cube(folder / f"{tag}.cube", picture)
 
 
-def write_glow(folder: Path, look: Look) -> tuple[Path, Path, Path]:
-    """1D LUTs for adding the glow as light: blurred source to the look's tinted glow, and display Rec.709 to and from
-    linear display light. The tint is applied here, after the blur, so the dim skirt of a blue-poor glow keeps 16-bit steps.
+def write_1d(path: Path, values: np.ndarray) -> Path:
+    with open(path, "w") as f:
+        f.write(f"LUT_1D_SIZE {len(values)}\n")
+        np.savetxt(f, values, fmt="%.7f")
+    return path
+
+
+def write_halation(sc: dict, folder: Path, tag: str, look: Look) -> tuple[Path, Path, Path]:
+    """This shot's halation: a shaper and a 3D LUT taking the camera's code values to the glow source, and a 1D LUT
+    taking the blurred source to the tinted light it adds.
+
+    A light is what the camera couldn't hold: the source is how close a pixel came to the sensor's clipping point, 0
+    below the last halation_from stops and 1 at the clip, judged by its brightest channel in the camera's own light, so
+    a lamp clipped in one channel counts and a white shirt or wall doesn't, however the shot was exposed or is printed.
+    The shaper spends the 3D grid on the top of the code range, where that knee is. The glow's strength is the clipped
+    light as this shot is printed (its balance), so it is applied after the blur and never runs out of range. The tint
+    is applied there too, so the dim skirt of a blue-poor glow keeps 16-bit steps."""
+    codes = np.linspace(0, 1, 65536)
+    light = color.decode(np.repeat(codes[:, None], 3, axis=1), sc["assumed"])[:, 0]  # one channel's transfer
+    stops = np.log2(np.maximum(light, 1e-12) / np.interp(color.CLIP, codes, light))  # below clip, per code value
+    low = float(np.interp(-1.25 * look.halation_from, stops, codes))  # the grid starts a little below the knee
+    grid = low + (1 - low) * np.linspace(0, 1, SIZE)
+    b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")  # .cube order: red changes fastest
+    brightest = np.interp(np.maximum(np.maximum(r, g), b).ravel(), codes, stops)
+    near = np.clip(1 + brightest / look.halation_from, 0, 1)
+    clipped = color.luminance(color.to_linear_709(np.full(3, color.CLIP), sc["assumed"]) * balance(sc, look))
+    glow = np.minimum(look.halation * clipped * np.linspace(0, 1, 4096)[:, None] * np.array(look.halation_tint), 1)
+    return (write_1d(folder / f"{tag}-shaper.cube", np.repeat(np.clip((codes - low) / (1 - low), 0, 1)[:, None], 3, axis=1)),
+            write_cube(folder / f"{tag}-halation.cube", np.repeat((near * near * (3 - 2 * near))[:, None], 3, axis=1)),
+            write_1d(folder / f"{tag}-glow.cube", glow))
+
+
+def write_display(folder: Path) -> tuple[Path, Path]:
+    """1D LUTs between display Rec.709 and linear display light, where the glow is added.
 
     The print maps 18% grey to about 17% display light, so light added on the display side lands close to where the
     same light added to the negative would."""
-    def write(name: str, values: np.ndarray) -> Path:
-        path = folder / name
-        with open(path, "w") as f:
-            f.write(f"LUT_1D_SIZE {len(values)}\n")
-            np.savetxt(f, values, fmt="%.7f")
-        return path
     x = np.linspace(0, 1, 65536)[:, None] * np.ones(3)
-    glow = np.minimum(look.halation * HALATION_SCALE * np.linspace(0, 1, 4096)[:, None] * np.array(look.halation_tint), 1)
-    return write("glow.cube", glow), write("decode.cube", x ** 2.4), write("encode.cube", x ** (1 / 2.4))
+    return write_1d(folder / "decode.cube", x ** 2.4), write_1d(folder / "encode.cube", x ** (1 / 2.4))
 
 
 def write_vignette(path: Path, size: tuple[int, int], look: Look) -> Path:

@@ -10,13 +10,25 @@ def identity(sc: dict) -> dict:
     return {"color": VERSION, "log": sc["assumed"]["log"], "gamut": sc["assumed"]["gamut"]}
 
 
+def canon_log3(assumed: dict) -> bool:
+    return assumed.get("log") == "Canon Log 3" and assumed.get("gamut") == "Cinema Gamut"
+
+
+def decode(code: np.ndarray, assumed: dict) -> np.ndarray:
+    """Full-range code values (0..1) to the camera's own linear light, channel by channel, in its own gamut."""
+    import colour
+    if canon_log3(assumed):
+        return colour.models.log_decoding_CanonLog3(code, in_normalised_code_value=True, out_reflection=True)
+    return colour.models.eotf_BT1886(code)  # anything else is treated as ordinary Rec.709 video
+
+
 def to_linear_709(code: np.ndarray, assumed: dict) -> np.ndarray:
     """Full-range RGB code values (0..1) to scene-linear Rec.709, where 0.18 is mid grey."""
     import colour
-    if assumed.get("log") == "Canon Log 3" and assumed.get("gamut") == "Cinema Gamut":
-        lin = colour.models.log_decoding_CanonLog3(code, in_normalised_code_value=True, out_reflection=True)
+    lin = decode(code, assumed)
+    if canon_log3(assumed):
         return colour.RGB_to_RGB(lin, colour.RGB_COLOURSPACES["Cinema Gamut"], colour.RGB_COLOURSPACES["ITU-R BT.709"])
-    return colour.models.eotf_BT1886(code)  # anything else is treated as ordinary Rec.709 video
+    return lin
 
 
 def to_acescct(lin: np.ndarray) -> np.ndarray:

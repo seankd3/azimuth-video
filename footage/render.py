@@ -98,10 +98,11 @@ def retime(sc: dict, start: float, dur: float) -> str | None:
 def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look: grade.Look) -> list[str]:
     """Filter chains taking the framed picture at [src] (framing()) to the graded 16-bit RGB picture at [tag]."""
     w, h = size
-    lut, halo = grade.write_luts(sc, tmp, tag, look)
-    glow, decode, encode = (tmp / n for n in ("glow.cube", "decode.cube", "encode.cube"))
-    if not glow.exists():
-        grade.write_glow(tmp, look)  # one look per render, so one glow and one vignette
+    lut = grade.write_luts(sc, tmp, tag, look)
+    shaper, halo, glow = grade.write_halation(sc, tmp, tag, look)
+    decode, encode = tmp / "decode.cube", tmp / "encode.cube"
+    if not decode.exists():
+        grade.write_display(tmp)  # one look per render, so one display pair and one vignette
     if look.vignette and not (tmp / "vignette.png").exists():
         grade.write_vignette(tmp / "vignette.png", size, look)
     spread = h * look.halation_spread / 4
@@ -109,7 +110,7 @@ def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look
     return [
         f"[{src}]split[{tag}p][{tag}s]",
         f"[{tag}p]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}c]",
-        f"[{tag}s]lut3d=file='{halo}',scale={w // 4}:{h // 4}:flags=area,split[{tag}h1][{tag}h2]",
+        f"[{tag}s]lut1d=file='{shaper}',lut3d=file='{halo}',scale={w // 4}:{h // 4}:flags=area,split[{tag}h1][{tag}h2]",
         f"[{tag}h1]gblur=sigma={spread * 0.004:.2f}[{tag}t]",
         f"[{tag}h2]gblur=sigma={spread * 0.014:.2f}[{tag}k]",
         f"[{tag}t][{tag}k]mix=inputs=2:weights=0.6 0.4,lut1d=file='{glow}',scale={w}:{h}:flags=bicubic[{tag}g]",
