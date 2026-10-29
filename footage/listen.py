@@ -5,6 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import probe
+
 PARAKEET = Path.home() / ".local/share/voxtype/models/parakeet-tdt-0.6b-v2"
 MODELS = Path.home() / ".local/share/footage/models"
 RATE = 16000
@@ -36,6 +38,9 @@ def diarizer():
 
 
 def audio(clip: Path) -> np.ndarray:
+    """The clip's sound as mono at RATE; nothing for a clip shot without sound."""
+    if not any(st["codec_type"] == "audio" for st in probe.ffprobe(clip)["streams"]):
+        return np.zeros(0, np.float32)
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(clip), "-vn", "-ac", "1", "-ar", str(RATE), "-f", "f32le", "-"],
                          capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype=np.float32)
