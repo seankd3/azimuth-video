@@ -25,7 +25,7 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    - each shot gets its own exposure and white-balance correction;
    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
      its warmth, halation around light sources, and lens vignette;
-   - the looks are files in `looks/`: `cinema` (the default), `classic`, `cinestill-800t`, `kodak-gold-200`,
+   - the looks are files in `looks/`: `cinema` (the default house look), `classic`, `cinestill-800t`, `kodak-gold-200`,
      `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
      `python -m footage.grade` lists them;
    - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
@@ -81,11 +81,14 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
 {
   "context": "One sentence about what the footage shows, given to the description model.",
   "timezone": "Area/City",
+  "look": "cinema",
   "cameras": [{"model_prefix": "Canon EOS", "squeeze": 1.6, "log": "Canon Log 3", "gamut": "Cinema Gamut"}]
 }
 ```
 
 - Without a timezone, shooting days follow the system's local time.
+- `look` is the house look: every render and still uses it, so every clip is printed the same way, unless a timeline's
+  `metadata["footage"]["look"]` or `--look` names another. Each shot still gets its own white balance and exposure first.
 - Without a matching camera rule, a clip's squeeze is unknown. Set it with `python -m footage.assume CLIP squeeze=1.6`.
   Change sidecars through `footage.assume` rather than by hand: it waits for any write in progress, so nothing is lost.
 - White balance trusts the camera's own balance and corrects only what the frame's near-grey surfaces show.
