@@ -49,6 +49,7 @@ python -m footage                     # file the inbox, then fill every sidecar 
 python -m footage.find hands --size close-up --steady   # find shots; each line shows its steady stretches and focus pulls
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
+python -m footage.frame CLIP 02:05 [--out PATH]   # one desqueezed, ungraded frame of any clip (card, Ingest or Library), for a transcript's timestamp
 python -m footage.assume 2026-10-29 support=tripod   # set what the file doesn't record, for clips or whole days
 python -m footage.graded              # every clip graded on its own, in the house look; skips masters still current
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links

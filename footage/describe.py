@@ -2,12 +2,12 @@
 import base64
 import hashlib
 import json
-import subprocess
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import config, view
+from .frame import jpeg
 
 VERSION = 1  # bump when the prompt, schema or frame sampling changes
 
@@ -68,10 +68,7 @@ def times(duration: float) -> list[float]:
 
 
 def frame(clip: Path, sc: dict, t: float) -> str:
-    jpg = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.2f}", "-i", view.source(clip, sc), "-frames:v", "1",
-                          "-vf", f"{view.cpu(sc, WIDTH)},setsar=1", "-q:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "-"],
-                         capture_output=True, check=True).stdout
-    return base64.b64encode(jpg).decode()
+    return base64.b64encode(jpeg(clip, sc, t, WIDTH)).decode()
 
 
 def valid_moments(moments: list, duration: float) -> list:
