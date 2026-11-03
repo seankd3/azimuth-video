@@ -13,16 +13,19 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 ## What it does
 
 1. **File.** It moves finished clips from an inbox into one folder per shooting day. It never overwrites a file,
-   and it leaves duplicates in the inbox.
-2. **Describe.** A local vision model writes a summary, tags, shot size, camera movement and usable moments for each clip.
-3. **Transcribe.** Parakeet transcribes the speech, and a diarizer labels the speakers. The same transcriber runs on
+   and it leaves duplicates in the inbox. Canon Cinema RAW Light (`.CRM`) files are clips too.
+2. **Develop RAW.** LibRaw develops every frame of a RAW clip into the code values the camera records (its log curve
+   and gamut), stored as all-intra 12-bit 4:4:4 HEVC in the day's `.developed/` folder. Every step below reads a RAW
+   clip's pictures from there, and its sidecar ids record the development, so a new development redoes them.
+3. **Describe.** A local vision model writes a summary, tags, shot size, camera movement and usable moments for each clip.
+4. **Transcribe.** Parakeet transcribes the speech, and a diarizer labels the speakers. The same transcriber runs on
    any recording: `python -m footage.transcribe FILE` writes its words, Markdown and SRT/VTT subtitles.
-4. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
-5. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
-6. **Recognize people.** It groups faces into people across the whole library. You can add names to `people.json`.
-7. **Measure shake.** It follows the camera's motion on every frame and records, second by second, how much the
+5. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
+6. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
+7. **Recognize people.** It groups faces into people across the whole library. You can add names to `people.json`.
+8. **Measure shake.** It follows the camera's motion on every frame and records, second by second, how much the
    camera shakes beyond its smoothed path. Moving hands and people in front of a locked-off camera don't count.
-8. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
+9. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
    - each shot gets its own exposure and white-balance correction;
    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
      its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
@@ -47,6 +50,7 @@ python -m footage.find hands --size close-up --steady   # find shots; each line 
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
 python -m footage.assume 2026-10-29 support=tripod   # set what the file doesn't record, for clips or whole days
+python -m footage.graded              # every clip graded on its own, in the house look; skips masters still current
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links
 ```
 
@@ -55,6 +59,7 @@ The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the 
 - `~/Videos/Ingest/`: the inbox. Copy from the card here.
 - `~/Videos/Library/`: raw footage, one folder per shooting day. Timelines point into it, so keep its name.
 - `~/Videos/Edits/<date> <name>/`: finished edits. The timeline, its renders ("EDIT - LOOK.mp4"), and its stills.
+- `~/Videos/Graded/<day>/`: every clip graded on its own: "CLIP.MP4.otio" and "CLIP.MP4 - LOOK.mp4", the whole take with its sound.
 - `~/Videos/Toolkit tests/<topic>/`: experiments, comparisons and before/after tests. A timeline picks its look
 with `metadata["footage"]["look"]`; `--look` overrides it. Runs and renders use idle CPU and disk priority, so they
 take only what the desktop leaves.
@@ -64,7 +69,8 @@ take only what the desktop leaves.
 This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Spark GPU.
 
 - Python 3.12 with numpy, scipy, colour-science, opentimelineio, opencv-python-headless, onnx-asr and sherpa-onnx.
-- `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC and 10-bit x265 (for example, a BtbN build).
+- `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC, zscale and 10/12-bit x265 (for example, a BtbN build).
+- LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`), for RAW clips.
 - LM Studio, serving `qwen/qwen3.5-35b-a3b`, for the descriptions.
 - Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), the pyannote segmentation model and NeMo
   TitaNet (sherpa-onnx), and Parakeet TDT 0.6B v2. Keep the folder read-only (`chmod -R a-w`): a section is identified

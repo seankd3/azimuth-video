@@ -35,9 +35,7 @@ def grid_sharpness(clip: Path, sc: dict) -> tuple[np.ndarray, np.ndarray, np.nda
     """Log sharpness per region per frame, a coarse thumbnail per frame for motion, and the pan (pixels per frame)."""
     import cv2
     h = view.size(sc, W)[1]
-    p = subprocess.Popen(["ffmpeg-gpu", "-v", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", str(clip),
-                          "-vf", f"{view.cuda(sc, W)},format=gray", "-f", "rawvideo", "-"],
-                         stdout=subprocess.PIPE)
+    p = subprocess.Popen(view.grey(clip, sc, W), stdout=subprocess.PIPE)
     sharp, thumbs, pans, last = [], [], [], None
     window = cv2.createHanningWindow((W, h), cv2.CV_32F)
     while len(b := p.stdout.read(W * h)) == W * h:

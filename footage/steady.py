@@ -48,10 +48,7 @@ def motion(clip: Path, sc: dict, start: float, frames: int) -> np.ndarray:
     """Frame-to-frame camera motion: x, y (in widths of the desqueezed frame) and roll (rad); NaN where cells disagree."""
     import cv2
     h = view.size(sc, W)[1]
-    p = subprocess.Popen(["ffmpeg-gpu", "-v", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
-                          "-ss", f"{start:.3f}", "-i", str(clip), "-frames:v", str(frames),
-                          "-vf", f"{view.cuda(sc, W)},format=gray", "-f", "rawvideo", "-"],
-                         stdout=subprocess.PIPE)
+    p = subprocess.Popen(view.grey(clip, sc, W, start, frames), stdout=subprocess.PIPE)
     ch, cw = h // GY, W // GX
     centre = np.array([W / 2, h / 2], np.float32)
     cell = lambda pts: np.unique((pts[:, 1] // ch) * GX + pts[:, 0] // cw)

@@ -22,6 +22,22 @@ def decode(code: np.ndarray, assumed: dict) -> np.ndarray:
     return colour.models.eotf_BT1886(code)  # anything else is treated as ordinary Rec.709 video
 
 
+def encode(lin: np.ndarray, assumed: dict) -> np.ndarray:
+    """The camera's own linear light to full-range code values (0..1): decode's inverse."""
+    import colour
+    if canon_log3(assumed):
+        return colour.models.log_encoding_CanonLog3(lin, out_normalised_code_value=True, in_reflection=True)
+    return colour.models.eotf_inverse_BT1886(lin)
+
+
+def from_709(assumed: dict) -> np.ndarray:
+    """The matrix from linear Rec.709 to the camera's own gamut."""
+    import colour
+    if canon_log3(assumed):
+        return colour.matrix_RGB_to_RGB(colour.RGB_COLOURSPACES["ITU-R BT.709"], colour.RGB_COLOURSPACES["Cinema Gamut"])
+    return np.eye(3)
+
+
 def to_linear_709(code: np.ndarray, assumed: dict) -> np.ndarray:
     """Full-range RGB code values (0..1) to scene-linear Rec.709, where 0.18 is mid grey."""
     import colour

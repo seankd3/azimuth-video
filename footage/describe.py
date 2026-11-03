@@ -68,7 +68,7 @@ def times(duration: float) -> list[float]:
 
 
 def frame(clip: Path, sc: dict, t: float) -> str:
-    jpg = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.2f}", "-i", str(clip), "-frames:v", "1",
+    jpg = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.2f}", "-i", view.source(clip, sc), "-frames:v", "1",
                           "-vf", f"{view.cpu(sc, WIDTH)},setsar=1", "-q:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "-"],
                          capture_output=True, check=True).stdout
     return base64.b64encode(jpg).decode()

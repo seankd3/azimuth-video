@@ -19,7 +19,7 @@ def identity(sc: dict) -> dict:
 
 def frames(clip: Path, sc: dict, t: float, n: int = 1, w: int = W) -> np.ndarray:
     h = view.size(sc, w)[1]
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.3f}", "-i", str(clip), "-frames:v", str(n),
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{t:.3f}", "-i", view.source(clip, sc), "-frames:v", str(n),
                           "-vf", view.cpu(sc, w), "-pix_fmt", "rgb48le", "-f", "rawvideo", "-"],
                          capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype="<u2").reshape(-1, h, w, 3).astype(np.float32) / 65535

@@ -8,7 +8,7 @@ import fcntl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import idle, library, people, probe, sidecar
+from . import develop, idle, library, people, probe, sidecar
 from .passes import PASSES, Pass, current
 
 
@@ -66,6 +66,7 @@ def main() -> None:
             raise SystemExit("Another footage run is using this Library.")
         report: list = []
         library.file_inbox(a.ingest, a.library, report)
+        develop.build(a.library, report)
         for p in PASSES:
             fill(a.library, p, report)
         people.build(a.library, report)

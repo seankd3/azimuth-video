@@ -1,8 +1,13 @@
 """What picture each analysis sees: a clip's recorded frame desqueezed, the 2.39:1 window the edit shows, and sizes.
 
 Every decode in the toolkit takes its crop and scale from here, so a clip's geometry has one definition. A clip whose
-squeeze isn't known yet is read as unsqueezed.
+squeeze isn't known yet is read as unsqueezed. Every decode reads the file `source` names: the clip itself, or for a
+RAW clip its developed picture (develop.py).
 """
+from pathlib import Path
+
+from . import develop
+
 ASPECT = 2.39
 VERSION = 1  # bump when what a picture is changes, so everything measured from pictures is redone
 
@@ -10,7 +15,18 @@ VERSION = 1  # bump when what a picture is changes, so everything measured from 
 def identity(sc: dict) -> dict:
     """Everything a clip's picture geometry depends on: part of the identity of every section read from pictures."""
     f = sc["facts"]
-    return {"view": VERSION, "squeeze": sc["assumed"]["squeeze"], "width": f["width"], "height": f["height"]}
+    developed = {"developed": develop.identity(sc)} if develop.raw(sc) else {}
+    return {"view": VERSION, "squeeze": sc["assumed"]["squeeze"], "width": f["width"], "height": f["height"], **developed}
+
+
+def source(clip: Path, sc: dict) -> str:
+    """The file a clip's pictures are decoded from."""
+    if not develop.raw(sc):
+        return str(clip)
+    picture = develop.path(clip, sc)
+    if not picture.exists():
+        raise ValueError(f"{clip.name} is not developed yet: run python -m footage")
+    return str(picture)
 
 
 def squeeze(sc: dict) -> float:
@@ -53,6 +69,11 @@ def cpu(sc: dict, width: int) -> str:
     return "scale={}:{}".format(*size(sc, width))
 
 
-def cuda(sc: dict, width: int) -> str:
-    """The same for frames decoded on the GPU (NVDEC): scaled there, then brought back as 8-bit 4:2:0."""
-    return "scale_cuda={}:{}:format=nv12,hwdownload,format=nv12".format(*size(sc, width))
+def grey(clip: Path, sc: dict, width: int, start: float = 0, frames: int | None = None) -> list[str]:
+    """An ffmpeg command writing the whole desqueezed frames `width` pixels wide as 8-bit grey, from `start` on.
+    NVDEC decodes and scales them on the GPU; it can't open a developed RAW picture (8K 4:4:4), so the CPU decodes that."""
+    gpu = not develop.raw(sc)
+    scale = "scale_cuda={}:{}:format=nv12,hwdownload,format=nv12".format(*size(sc, width)) if gpu else cpu(sc, width)
+    return ["ffmpeg-gpu", "-v", "error", *(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] if gpu else []),
+            "-ss", f"{start:.3f}", "-i", source(clip, sc), *(["-frames:v", str(frames)] if frames else []),
+            "-vf", f"{scale},format=gray", "-f", "rawvideo", "-"]

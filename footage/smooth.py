@@ -86,7 +86,7 @@ def jitter(clip: Path, sc: dict, start: float, n: int, sa: int, sb: int, chain: 
     W, H = view.size(sc, focus.W)
     g = (f"[0:v]trim=end_frame={n},setpts=PTS-STARTPTS,{view.cpu(sc, focus.W)},{chain}"
          f"tpad=stop_mode=clone:stop={BLUR},trim=end_frame={n},format=gray")
-    raw = subprocess.run(["ffmpeg-gpu", "-v", "error", "-ss", f"{start:.3f}", "-i", str(clip), "-filter_complex", g,
+    raw = subprocess.run(["ffmpeg-gpu", "-v", "error", "-ss", f"{start:.3f}", "-i", view.source(clip, sc), "-filter_complex", g,
                           "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
     y = np.frombuffer(raw, np.uint8).reshape(-1, H, W).astype(np.float32)
     lap = 4 * y[:, 1:-1, 1:-1] - y[:, :-2, 1:-1] - y[:, 2:, 1:-1] - y[:, 1:-1, :-2] - y[:, 1:-1, 2:]

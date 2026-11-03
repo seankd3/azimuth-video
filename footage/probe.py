@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import config
 
-VIDEO = {".mp4", ".mov"}
+VIDEO = {".mp4", ".mov", ".crm"}  # .crm: Canon Cinema RAW Light, read through develop.py
 
 
 def is_video(p: Path) -> bool:
@@ -107,7 +107,7 @@ def facts(p: Path) -> dict:
         "fps": v.get("r_frame_rate"),
         "width": v["width"],
         "height": v["height"],
-        "codec": v["codec_name"],
+        "codec": v.get("codec_name") or v.get("codec_tag_string"),  # a RAW codec ffmpeg can't decode has only its tag
         "pix_fmt": v.get("pix_fmt"),
         "color_range": v.get("color_range"),
         "color_space": v.get("color_space"),

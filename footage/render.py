@@ -1,7 +1,8 @@
 """Render Library clips through the grade: an OTIO timeline to a 2.39:1 master, or single stills, by one filter graph.
 
-The timeline is the whole edit: video track 1 is picture, every audio track is mixed under it. The whole edit is
-printed in one look (grade.py): the timeline's `metadata["footage"]["look"]`, or `--look`, or the default; the master
+The timeline is the whole edit: video track 1 is picture, every audio track is mixed under it. The edit fades in from
+black and out to black over `metadata["footage"]["fades"]` seconds ([in, out], default [0.8, 1.0]; 0 is a cut). The
+whole edit is printed in one look (grade.py): the timeline's `metadata["footage"]["look"]`, or `--look`, or the default; the master
 is written beside the timeline as "EDIT - LOOK.mp4", so one edit can be rendered in several looks. An audio clip may set
 `metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21). Kdenlive and Resolve open the same file.
 The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
@@ -123,8 +124,11 @@ def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look
 
 def render(edit: Path, name: str | None = None) -> Path:
     timeline = otio.adapters.read_from_file(str(edit))
-    look = grade.look(name or timeline.metadata.get("footage", {}).get("look", grade.DEFAULT))
+    settings = timeline.metadata.get("footage", {})
+    look = grade.look(name or settings.get("look", grade.DEFAULT))
+    fade_in, fade_out = settings.get("fades", (FADE_IN, FADE_OUT))
     out = edit.with_name(f"{edit.stem} - {look.name}.mp4")
+    part = out.with_suffix(".part.mp4")
     total = timeline.duration().to_seconds()
     pictures = [(p, read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
@@ -137,7 +141,7 @@ def render(edit: Path, name: str | None = None) -> Path:
                 graph.append(title(item, size, rate, n, f"v{i}"))
                 continue
             # Two decoder threads per input: sixteen 4K inputs at the default thread count would hold many GB of frames.
-            cmd += ["-threads", "2", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", str(clip)]
+            cmd += ["-threads", "2", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", view.source(clip, sc)]
             eased = retime(sc, start, dur.to_seconds()) or ""
             # A retimed focus pull is a still shot, so a shot is retimed or stabilized, never both: the retime then works on
             # the camera's own frames, and the stabilizer's frame-by-frame path matches the frames it moves.
@@ -150,7 +154,7 @@ def render(edit: Path, name: str | None = None) -> Path:
             inputs += 1
         # The camera's full-range flag must not reach the master: players expect standard (limited) range.
         graph.append("".join(f"[v{i}]" for i in range(len(pictures))) + f"concat=n={len(pictures)}:v=1:a=0,"
-                     f"fade=t=in:d={FADE_IN},fade=t=out:st={total - FADE_OUT:.3f}:d={FADE_OUT},"
+                     + (f"fade=t=in:d={fade_in}," if fade_in else "") + (f"fade=t=out:st={total - fade_out:.3f}:d={fade_out}," if fade_out else "") +
                      f"scale=out_color_matrix=bt709:out_range=limited,format=yuv420p10le[v]")
         mix = []
         for track in timeline.audio_tracks():
@@ -165,15 +169,16 @@ def render(edit: Path, name: str | None = None) -> Path:
         maps = ["-map", "[v]"]
         if mix:
             graph.append("".join(f"[m{k}]" for k in range(len(mix))) + f"amix=inputs={len(mix)}:normalize=0:duration=longest,"
-                         f"atrim=0:{total:.3f},afade=t=out:st={total - FADE_OUT:.3f}:d={FADE_OUT}[a]")
+                         f"atrim=0:{total:.3f}" + (f",afade=t=out:st={total - fade_out:.3f}:d={fade_out}" if fade_out else "") + "[a]")
             maps += ["-map", "[a]", "-c:a", "aac", "-b:a", "256k"]
         cmd += ["-filter_complex", ";".join(graph), *maps,
                 "-c:v", "libx265", "-preset", "medium", "-crf", "16", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1",
                 "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error",
                 "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
-                "-write_tmcd", "0", "-movflags", "+faststart", str(out)]
+                "-write_tmcd", "0", "-movflags", "+faststart", str(part)]
         print(f"  {len(pictures)} shots at {size[0]}x{size[1]} in {look.name}", flush=True)
         subprocess.run(cmd, check=True)
+    part.rename(out)  # a render that stops leaves its part, never a short master under the master's name
     return out
 
 
@@ -183,7 +188,7 @@ def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     with tempfile.TemporaryDirectory() as tmp:
         size = view.master([sc])
         graph = [f"[0:v]{framing(sc, size, None, Path(tmp), 'x')}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
-        subprocess.run([FFMPEG, "-v", "error", "-y", "-threads", "4", "-ss", f"{t:.3f}", "-i", str(clip),
+        subprocess.run([FFMPEG, "-v", "error", "-y", "-threads", "4", "-ss", f"{t:.3f}", "-i", view.source(clip, sc),
                         "-filter_complex", ";".join(graph), "-map", "[o]", "-frames:v", "1",
                         "-pix_fmt", "yuvj444p", "-q:v", "1", str(out)], check=True)
     return out
