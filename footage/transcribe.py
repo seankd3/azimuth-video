@@ -1,12 +1,13 @@
 """python -m footage.transcribe FILE: any recording's speaker-labelled transcript, as word JSON, Markdown, SRT and VTT.
 
     python -m footage.transcribe FILE [--speakers N] [--names "Sean,Paul"] [--out DIR]
-    python -m footage.transcribe DIR/NAME.json --names "Sean,Paul"    # rename voices and re-render, no re-run
+    python -m footage.transcribe DIR/NAME.json --names "Sean,Paul,Sean"    # rename voices and re-render, no re-run
 
 The words come from listen.hear, the same function as a clip's transcript section. NAME.json holds every word (text,
 start, end, confidence, speaker) and the speakers' names; the other three files are rendered from it, so a hand fix
-to a word's speaker or a renamed voice is one re-render away. NAME is the source's whole file name plus ".transcript",
-so outputs never meet a clip's sidecar or another file, and a run writes over no transcript but the one it re-renders.
+to a word's speaker or a renamed voice is one re-render away, and voices given one name render as one person. NAME is
+the source's whole file name plus ".transcript", so outputs never meet a clip's sidecar or another file, and a run
+writes over no transcript but the one it re-renders.
 """
 import argparse
 import json
@@ -65,27 +66,29 @@ def name(source: str, out: Path) -> Path:
 
 def render(doc: dict, out: Path) -> Path:
     words, names = doc["words"], doc["speakers"]
+    people = list(dict.fromkeys(names))
     stem = name(doc["source"], out)
-    turns = list(grouped(words, lambda g, w: w["speaker"] != g[-1]["speaker"] or w["start"] - g[-1]["end"] > PARAGRAPH_GAP))
+    other = lambda g, w: names[w["speaker"]] != names[g[-1]["speaker"]]  # voices given one name are one person
+    turns = list(grouped(words, lambda g, w: other(g, w) or w["start"] - g[-1]["end"] > PARAGRAPH_GAP))
     doc["turns"] = [{"speaker": g[0]["speaker"], "start": g[0]["start"], "end": g[-1]["end"], "text": text(g)} for g in turns]
     Path(f"{stem}.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
 
-    md = [f"# {Path(doc['source']).name}", "", f"{clock(doc['duration'], hours=False)}, voices: {', '.join(names)}", ""]
+    md = [f"# {Path(doc['source']).name}", "", f"{clock(doc['duration'], hours=False)}, voices: {', '.join(people)}", ""]
     for t in doc["turns"]:
         md += [f"**{names[t['speaker']]}** {clock(t['start'], hours=False)}", "", t["text"], ""]
     Path(f"{stem}.md").write_text("\n".join(md))
 
     # A cue lasts as long as its words, so it is never empty; two words heard on one frame may overlap it with the next.
     cues = list(grouped(words, lambda g, w: (
-        w["speaker"] != g[-1]["speaker"] or w["start"] - g[-1]["end"] > CUE_GAP
+        other(g, w) or w["start"] - g[-1]["end"] > CUE_GAP
         or len(text(g + [w])) > CUE_CHARS or w["end"] - g[0]["start"] > CUE_SECONDS
         or (g[-1]["text"][-1:] in ".?!" and len(text(g)) > CUE_LINE / 2))))
     srt, vtt = [], ["WEBVTT", ""]
     for i, g in enumerate(cues):
         start, end = g[0]["start"], g[-1]["end"]
         line, who = wrap(text(g)), names[g[0]["speaker"]]
-        srt += [str(i + 1), f"{clock(start, ',')} --> {clock(end, ',')}", f"{who}: {line}" if len(names) > 1 else line, ""]
-        vtt += [f"{clock(start)} --> {clock(end)}", f"<v {who}>{line}" if len(names) > 1 else line, ""]
+        srt += [str(i + 1), f"{clock(start, ',')} --> {clock(end, ',')}", f"{who}: {line}" if len(people) > 1 else line, ""]
+        vtt += [f"{clock(start)} --> {clock(end)}", f"<v {who}>{line}" if len(people) > 1 else line, ""]
     Path(f"{stem}.srt").write_text("\n".join(srt))
     Path(f"{stem}.vtt").write_text("\n".join(vtt))
     return stem
@@ -111,7 +114,7 @@ def main() -> None:
     for i, given in enumerate(a.names.split(",")[:len(doc["speakers"])]):
         doc["speakers"][i] = given.strip() or doc["speakers"][i]
     out.mkdir(parents=True, exist_ok=True)
-    print(f"{render(doc, out)}.{{json,md,srt,vtt}}: {len(doc['words'])} words, voices: {', '.join(doc['speakers'])}")
+    print(f"{render(doc, out)}.{{json,md,srt,vtt}}: {len(doc['words'])} words, voices: {', '.join(dict.fromkeys(doc['speakers']))}")
 
 
 if __name__ == "__main__":
