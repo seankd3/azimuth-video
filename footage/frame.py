@@ -19,10 +19,11 @@ WIDTH = 1600
 
 def facts(clip: Path) -> dict:
     """A clip's sidecar, or for a clip with none what view needs from it, read from the file without hashing it."""
-    sc = sidecar.read(clip) or unfiled(clip)
+    filed = sidecar.read(clip)
+    sc = filed or unfiled(clip)
     if sc["assumed"]["squeeze"] is None:
-        raise SystemExit(f"{clip}: its lens squeeze is unknown. A camera rule in the config gives it; for a filed clip, "
-                         "so does python -m footage.assume.")
+        how = "set it in its sidecar with python -m footage.assume" if filed else "add a camera rule for its camera to the config"
+        raise SystemExit(f"{clip.resolve()}: its lens squeeze is unknown: {how}")
     return sc
 
 
