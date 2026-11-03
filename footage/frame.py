@@ -1,8 +1,10 @@
-"""python -m footage.frame CLIP SECONDS [--out PATH]: one frame of any clip, desqueezed, as a JPEG.
+"""python -m footage.frame CLIP SECONDS [--out PATH.jpg]: one frame of a clip, desqueezed, as a JPEG.
 
 For looking up what a transcript's timestamp shows. A filed clip reads its sidecar (its squeeze, and a RAW clip's
 developed picture); any other video, such as one still on the card, takes its squeeze from the camera rules, as filing
-would. The picture is the camera's own (flat log), not the grade: python -m footage.render --stills is the graded one.
+would. A RAW clip is seen once filing has developed it, and a clip whose squeeze is unknown not until it is set
+(python -m footage.assume), so a frame is never shown squeezed. The picture is the camera's own (flat log), not the
+grade: python -m footage.render --stills is the graded one.
 
     python -m footage.frame /run/media/sean/EOS_DIGITAL/DCIM/100EAKSS/SKDA0909.MP4 125.5 --out cut-02:05.jpg
 """
@@ -17,9 +19,13 @@ WIDTH = 1600
 
 def facts(clip: Path) -> dict:
     """A clip's sidecar, or for a clip with none what view needs from it, read from the file without hashing it."""
-    sc = sidecar.read(clip)
-    if sc is not None:
-        return sc
+    sc = sidecar.read(clip) or unfiled(clip)
+    if sc["assumed"]["squeeze"] is None:
+        raise SystemExit(f"{clip.name}: its lens squeeze is unknown: set it with python -m footage.assume CLIP squeeze=N")
+    return sc
+
+
+def unfiled(clip: Path) -> dict:
     info = probe.ffprobe(clip)
     v = next(s for s in info["streams"] if s["codec_type"] == "video")
     f = {"original_name": clip.name, "width": v["width"], "height": v["height"],
@@ -48,13 +54,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="footage.frame")
     ap.add_argument("clip", type=Path)
     ap.add_argument("seconds", type=seconds, help="125.5, 02:05 or 1:02:05")
-    ap.add_argument("--out", type=Path, help="default: CLIP's name and the time, in the current folder")
+    ap.add_argument("--out", type=Path, help="a .jpg; default: CLIP's name and the time, in the current folder")
     ap.add_argument("--width", type=int, default=WIDTH)
     a = ap.parse_args()
     idle()
     out = a.out or Path(f"{a.clip.stem}-{a.seconds:.2f}.jpg")
-    data = jpeg(a.clip, facts(a.clip), a.seconds, a.width)
+    if out.suffix.lower() not in (".jpg", ".jpeg"):  # never writes over a clip, or anything but a picture
+        raise SystemExit(f"--out must be a .jpg: {out}")
+    sc = facts(a.clip)
+    try:  # past the end, ffmpeg fails or writes nothing
+        data = jpeg(a.clip, sc, a.seconds, a.width)
+    except subprocess.CalledProcessError:
+        data = b""
     if not data:
-        raise SystemExit(f"no frame at {a.seconds:.2f} s: the clip is shorter")
+        raise SystemExit(f"no frame of {a.clip.name} at {a.seconds:.2f} s: past its end, or ffmpeg cannot decode it")
     out.write_bytes(data)
     print(out)
