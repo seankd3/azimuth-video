@@ -12,16 +12,21 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from . import develop, idle, probe, sidecar, view
+from . import develop, idle, library, probe, sidecar, view
 
 WIDTH = 1600
 
 
 def facts(clip: Path) -> dict:
     """A clip's sidecar, or for a clip with none what view needs from it, read from the file without hashing it."""
-    sc = sidecar.read(clip) or unfiled(clip)
+    sc = sidecar.read(clip)
+    if sc is None:
+        sc = unfiled(clip)
+        how = "add a camera rule for its camera to the config, or file it (python -m footage) and set it with footage.assume"
+    else:
+        how = f"set it with python -m footage.assume {library.name_of(clip)} squeeze=N"
     if sc["assumed"]["squeeze"] is None:
-        raise SystemExit(f"{clip.name}: its lens squeeze is unknown: set it with python -m footage.assume CLIP squeeze=N")
+        raise SystemExit(f"{clip.name}: its lens squeeze is unknown: {how}")
     return sc
 
 
