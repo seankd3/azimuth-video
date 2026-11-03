@@ -6,7 +6,7 @@ would. A RAW clip is seen once filing has developed it, and a clip whose squeeze
 (python -m footage.assume), so a frame is never shown squeezed. The picture is the camera's own (flat log), not the
 grade: python -m footage.render --stills is the graded one.
 
-    python -m footage.frame /run/media/sean/EOS_DIGITAL/DCIM/100EAKSS/SKDA0909.MP4 125.5 --out cut-02:05.jpg
+    python -m footage.frame ~/Videos/Library/2026-11-03/SKDA0909.MP4 125.5 --out cut-02:05.jpg
 """
 import argparse
 import subprocess
