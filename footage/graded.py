@@ -58,6 +58,11 @@ def timeline(clip: Path, sc: dict, look: grade.Look) -> otio.schema.Timeline:
     return t
 
 
+def stamped(edit: Path) -> str | None:
+    t = otio.adapters.read_from_file(str(edit))  # held: metadata read from a temporary timeline is freed under it
+    return t.metadata["footage"].get("stamp")
+
+
 def grade_all(lib: Path, out: Path, look: grade.Look) -> None:
     clips = sorted(library.clips(lib), key=lambda c: (c.parent.name, c.name), reverse=True)
     counts = {"current": 0, "rendered": 0, "waiting": 0, "failed": 0}
@@ -71,8 +76,7 @@ def grade_all(lib: Path, out: Path, look: grade.Look) -> None:
             print(f"waiting {i}/{len(clips)} {library.name_of(clip)}: {e}", flush=True)
             continue
         made_from = stamp(sc, look)
-        if master.exists() and edit.exists() and \
-                otio.adapters.read_from_file(str(edit)).metadata["footage"].get("stamp") == made_from:
+        if master.exists() and edit.exists() and stamped(edit) == made_from:
             counts["current"] += 1
             continue
         print(f"rendering {i}/{len(clips)} {library.name_of(clip)}", flush=True)
