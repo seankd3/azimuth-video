@@ -1,0 +1,118 @@
+"""python -m footage.transcribe FILE: any recording's speaker-labelled transcript, as word JSON, Markdown, SRT and VTT.
+
+    python -m footage.transcribe FILE [--speakers N] [--names "Sean,Paul"] [--out DIR]
+    python -m footage.transcribe DIR/NAME.json --names "Sean,Paul"    # rename voices and re-render, no re-run
+
+The words come from listen.hear, the same function as a clip's transcript section. NAME.json holds every word (text,
+start, end, confidence, speaker) and the speakers' names; the other three files are rendered from it, so a hand fix
+to a word's speaker or a renamed voice is one re-render away. NAME is the source's whole file name plus ".transcript",
+so outputs never meet a clip's sidecar or another file, and a run writes over no transcript but the one it re-renders.
+"""
+import argparse
+import json
+from pathlib import Path
+
+from . import idle, listen
+
+PARAGRAPH_GAP = 2.0  # seconds of silence that start a new paragraph for the same voice
+CUE_CHARS, CUE_LINE, CUE_SECONDS, CUE_GAP = 84, 42, 6.0, 0.7  # subtitle cues: two lines of 42, at most 6 s
+
+
+def transcribe(media: Path, speakers: int) -> dict:
+    a = listen.audio(media)
+    lines, _ = listen.hear(a, speakers) if a.size else ([], {})
+    words = [w for line in lines for w in line["words"]]
+    order = list(dict.fromkeys(w["speaker"] for w in words if w["speaker"] is not None))
+    for w in words:  # voices numbered by first appearance, so --names goes in the order people speak
+        w["speaker"] = order.index(w["speaker"]) if w["speaker"] is not None else len(order)
+    unknown = ["Unknown"] if any(w["speaker"] == len(order) for w in words) else []
+    return {"source": str(media.resolve()), "duration": round(a.size / listen.RATE, 2), "listen": listen.identity({}),
+            "speakers": [f"Speaker {i + 1}" for i in range(len(order))] + unknown, "words": words}
+
+
+def grouped(words, breaks):
+    group = []
+    for w in words:
+        if group and breaks(group, w):
+            yield group
+            group = []
+        group.append(w)
+    if group:
+        yield group
+
+
+def text(words) -> str:
+    return " ".join(w["text"] for w in words)
+
+
+def wrap(line: str) -> str:
+    if len(line) <= CUE_LINE:
+        return line
+    cut = min((i for i, c in enumerate(line) if c == " "), key=lambda i: abs(i - len(line) / 2), default=None)
+    return line if cut is None else line[:cut] + "\n" + line[cut + 1:]
+
+
+def clock(t: float, sep: str = ".", hours: bool = True) -> str:
+    m, ms = divmod(round(t * 1000), 60000)
+    h, m = divmod(m, 60)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}{sep}{ms:03d}" if hours else f"{h * 60 + m:02d}:{s:02d}"
+
+
+def name(source: str, out: Path) -> Path:
+    return out / f"{Path(source).name}.transcript"
+
+
+def render(doc: dict, out: Path) -> Path:
+    words, names = doc["words"], doc["speakers"]
+    stem = name(doc["source"], out)
+    turns = list(grouped(words, lambda g, w: w["speaker"] != g[-1]["speaker"] or w["start"] - g[-1]["end"] > PARAGRAPH_GAP))
+    doc["turns"] = [{"speaker": g[0]["speaker"], "start": g[0]["start"], "end": g[-1]["end"], "text": text(g)} for g in turns]
+    Path(f"{stem}.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
+
+    md = [f"# {Path(doc['source']).name}", "", f"{clock(doc['duration'], hours=False)}, voices: {', '.join(names)}", ""]
+    for t in doc["turns"]:
+        md += [f"**{names[t['speaker']]}** {clock(t['start'], hours=False)}", "", t["text"], ""]
+    Path(f"{stem}.md").write_text("\n".join(md))
+
+    # A cue lasts as long as its words, so it is never empty; two words heard on one frame may overlap it with the next.
+    cues = list(grouped(words, lambda g, w: (
+        w["speaker"] != g[-1]["speaker"] or w["start"] - g[-1]["end"] > CUE_GAP
+        or len(text(g + [w])) > CUE_CHARS or w["end"] - g[0]["start"] > CUE_SECONDS
+        or (g[-1]["text"][-1:] in ".?!" and len(text(g)) > CUE_LINE / 2))))
+    srt, vtt = [], ["WEBVTT", ""]
+    for i, g in enumerate(cues):
+        start, end = g[0]["start"], g[-1]["end"]
+        line, who = wrap(text(g)), names[g[0]["speaker"]]
+        srt += [str(i + 1), f"{clock(start, ',')} --> {clock(end, ',')}", f"{who}: {line}" if len(names) > 1 else line, ""]
+        vtt += [f"{clock(start)} --> {clock(end)}", f"<v {who}>{line}" if len(names) > 1 else line, ""]
+    Path(f"{stem}.srt").write_text("\n".join(srt))
+    Path(f"{stem}.vtt").write_text("\n".join(vtt))
+    return stem
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(prog="footage.transcribe", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("file", type=Path, help="any audio or video file ffmpeg reads, or a .json this wrote")
+    ap.add_argument("--speakers", type=int, default=-1, help="how many voices, when known: clustering is much better")
+    ap.add_argument("--names", default="", help="names in the order the voices first speak")
+    ap.add_argument("--out", type=Path, help="output folder; default: beside FILE")
+    a = ap.parse_args()
+    idle()
+    out = a.out or a.file.resolve().parent
+    rerender = a.file.suffix == ".json"
+    doc = json.loads(a.file.read_text()) if rerender else None
+    # The one transcript a run may write over is the one it re-renders: any other may hold hand fixes.
+    dest = Path(f"{name(doc['source'] if rerender else str(a.file.resolve()), out)}.json")
+    if dest.exists() and not (rerender and dest.resolve() == a.file.resolve()):
+        raise SystemExit(f"{dest} exists: re-render from it, or delete it to transcribe again")
+    doc = doc or transcribe(a.file, a.speakers)
+    for i, given in enumerate(a.names.split(",")[:len(doc["speakers"])]):
+        doc["speakers"][i] = given.strip() or doc["speakers"][i]
+    out.mkdir(parents=True, exist_ok=True)
+    print(f"{render(doc, out)}.{{json,md,srt,vtt}}: {len(doc['words'])} words, voices: {', '.join(doc['speakers'])}")
+
+
+if __name__ == "__main__":
+    main()

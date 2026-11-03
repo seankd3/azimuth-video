@@ -12,6 +12,7 @@ PARAKEET = models.FOLDER / "parakeet-tdt-0.6b-v2"
 TITANET = models.FOLDER / "nemo_en_titanet_small.onnx"
 PYANNOTE = models.FOLDER / "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
 RATE = 16000
+FRAME = 0.08  # Parakeet's time step: 10 ms features, subsampled 8x
 
 
 def identity(sc: dict) -> dict:
@@ -21,7 +22,13 @@ def identity(sc: dict) -> dict:
 @cache
 def recognizer():
     import onnx_asr
-    return onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v2", str(PARAKEET)).with_vad(onnx_asr.load_vad("silero")).with_timestamps()
+    import onnxruntime as rt
+    # Waiting threads sleep instead of spinning: at idle priority a spinning pool waits on its slowest preempted
+    # thread, which halved the speed on a busy machine.
+    so = rt.SessionOptions()
+    so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    return onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v2", str(PARAKEET), sess_options=so).with_vad(
+        onnx_asr.load_vad("silero")).with_timestamps()
 
 
 @cache
@@ -32,14 +39,15 @@ def embedder():
 
 
 @cache
-def diarizer():
+def diarizer(speakers: int = -1):
+    """Who spoke when. Without a known count, voices closer than the threshold are one voice (0.6 split a clip into 23)."""
     import sherpa_onnx
     return sherpa_onnx.OfflineSpeakerDiarization(sherpa_onnx.OfflineSpeakerDiarizationConfig(
         segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
             pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
                 model=str(PYANNOTE)), num_threads=8),
         embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(TITANET), num_threads=8),
-        clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=0.95),
+        clustering=sherpa_onnx.FastClusteringConfig(num_clusters=speakers, threshold=0.95),
         min_duration_on=0.3, min_duration_off=0.5))
 
 
@@ -70,29 +78,61 @@ def voiceprint(a: np.ndarray, turns: list) -> list | None:
     return [round(float(x), 4) for x in v / np.linalg.norm(v)]
 
 
+def confidence(logprobs) -> float | None:
+    return round(float(np.exp(np.mean(logprobs))), 3) if logprobs is not None and len(logprobs) else None
+
+
+def words(r) -> list:
+    """One recognized line's tokens as words. A token that starts with a space starts a word. A token stamped at a frame
+    sounds for at least that frame, and a word lasts until the next word starts or the line ends (inside one stretch
+    of speech the gaps are short), so two words stamped at the same frame each last one frame."""
+    starts = [i for i, t in enumerate(r.tokens) if i == 0 or t.startswith(" ")]
+    out = []
+    for i, k in zip(starts, starts[1:] + [len(r.tokens)]):
+        until = r.timestamps[k] if k < len(r.tokens) else r.end - r.start
+        out.append({"start": round(r.start + r.timestamps[i], 2),
+                    "end": round(r.start + max(until, r.timestamps[k - 1] + FRAME), 2),
+                    "text": "".join(r.tokens[i:k]).strip(), "confidence": confidence(r.logprobs[i:k])})
+    return out
+
+
+def voice(span: dict, by_speaker: dict):
+    """The voice whose turns overlap the span most, or None when none does."""
+    overlap = {k: sum(max(0.0, min(span["end"], e) - max(span["start"], s)) for s, e in ts) for k, ts in by_speaker.items()}
+    best = max(overlap, key=overlap.get, default=None)
+    return best if best is not None and overlap[best] > 0 else None
+
+
+def hear(a: np.ndarray, speakers: int = -1) -> tuple[list, dict]:
+    """What was said and by which voice: each recognized line with its words, every line and word given the voice that
+    overlaps it most (a word no turn covers keeps its line's voice); and each voice's turns."""
+    lines = []
+    for r in recognizer().recognize(a, sample_rate=RATE):
+        text = r.text.strip()
+        if text:
+            lines.append({"start": round(r.start, 2), "end": round(r.end, 2), "text": text,
+                          "confidence": confidence(r.logprobs), "words": words(r)})
+    by_speaker: dict = {}
+    if lines:
+        for t in diarizer(speakers).process(a).sort_by_start_time():
+            by_speaker.setdefault(t.speaker, []).append((t.start, t.end))
+    for line in lines:
+        line["speaker"] = voice(line, by_speaker)
+        for w in line["words"]:
+            w["speaker"] = voice(w, by_speaker)
+            if w["speaker"] is None:
+                w["speaker"] = line["speaker"]
+    return lines, by_speaker
+
+
 def listen(clip: Path, sc: dict) -> dict:
     a = audio(clip)
     if a.size < RATE:
         return {"speech_seconds": 0.0, "segments": [], "speakers": []}
-    segments = []
-    for r in recognizer().recognize(a, sample_rate=RATE):
-        text = r.text.strip()
-        if not text:
-            continue
-        conf = float(np.exp(np.mean(r.logprobs))) if r.logprobs is not None and len(r.logprobs) else None
-        segments.append({"start": round(r.start, 2), "end": round(r.end, 2), "text": text,
-                         "confidence": round(conf, 3) if conf is not None else None, "speaker": None})
-    speakers = []
-    if segments:
-        turns = diarizer().process(a).sort_by_start_time()
-        by_speaker: dict = {}
-        for t in turns:
-            by_speaker.setdefault(t.speaker, []).append((t.start, t.end))
-        for k, ts in sorted(by_speaker.items()):
-            speakers.append({"id": f"s{k}", "seconds": round(sum(e - s for s, e in ts), 1), "voiceprint": voiceprint(a, ts)})
-        for seg in segments:  # each line goes to the voice that overlaps it most
-            overlap = {k: sum(max(0.0, min(seg["end"], e) - max(seg["start"], s)) for s, e in ts) for k, ts in by_speaker.items()}
-            best = max(overlap, key=overlap.get, default=None)
-            seg["speaker"] = f"s{best}" if best is not None and overlap[best] > 0 else None
+    lines, by_speaker = hear(a)
+    segments = [{"start": l["start"], "end": l["end"], "text": l["text"], "confidence": l["confidence"],
+                 "speaker": None if l["speaker"] is None else f"s{l['speaker']}"} for l in lines]
+    speakers = [{"id": f"s{k}", "seconds": round(sum(e - s for s, e in ts), 1), "voiceprint": voiceprint(a, ts)}
+                for k, ts in sorted(by_speaker.items())]
     return {"speech_seconds": round(sum(s["end"] - s["start"] for s in segments), 1),
             "segments": segments, "speakers": speakers}

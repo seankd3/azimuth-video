@@ -15,7 +15,8 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 1. **File.** It moves finished clips from an inbox into one folder per shooting day. It never overwrites a file,
    and it leaves duplicates in the inbox.
 2. **Describe.** A local vision model writes a summary, tags, shot size, camera movement and usable moments for each clip.
-3. **Transcribe.** Parakeet transcribes the speech, and a diarizer labels the speakers.
+3. **Transcribe.** Parakeet transcribes the speech, and a diarizer labels the speakers. The same transcriber runs on
+   any recording: `python -m footage.transcribe FILE` writes its words, Markdown and SRT/VTT subtitles.
 4. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
 5. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
 6. **Recognize people.** It groups faces into people across the whole library. You can add names to `people.json`.
