@@ -1,8 +1,12 @@
 __pycache__/
 *.pyc
-.venv/
 *.MP4
 *.mp4
 *.MOV
 *.mov
 *.CR3
+.venv
+# Sidecars, people.json and transcripts hold face and voice prints, which are biometric: no data JSON goes in git.
+*.json
+!looks/*.json
+*.transcript.*

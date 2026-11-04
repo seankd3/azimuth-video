@@ -1,7 +1,7 @@
 """Find shots in the Library: every clip whose sidecar matches all the words and filters, one line each.
 
-Words match anywhere in what the toolkit knows about a clip: its description, tags, moments, transcript and the
-person's name. Each line shows where the usable parts are: the steady stretches (from the shake pass) and the
+Words match anywhere in what the toolkit knows about a clip: its description, tags, moments, transcript, the
+person's name and the names of the voices heard. Each line shows where the usable parts are: the steady stretches (from the shake pass) and the
 focus pulls, so a shot can be cut straight from the list. Sections that are out of date are left out of the search,
 and the count of clips that had any is printed after the results.
 
@@ -41,7 +41,8 @@ def text(sc: dict) -> str:
     d, t = sc.get("description", {}), sc.get("transcript", {})
     words = [d.get("summary", ""), d.get("action", ""), d.get("setting", ""), d.get("shot_size", ""), d.get("camera_movement", ""),
              *d.get("subjects", []), *d.get("tags", []), *(m["what"] for m in d.get("moments", [])),
-             *(seg.get("text", "") for seg in t.get("segments", [])), (sc.get("person") or {}).get("name") or ""]
+             *(seg.get("text", "") for seg in t.get("segments", [])), (sc.get("person") or {}).get("name") or "",
+             *sc.get("voices", {}).values()]
     return " ".join(words).lower()
 
 
@@ -49,16 +50,16 @@ def record(clip: Path, sc: dict) -> dict:
     d = sc.get("description", {})
     return {"clip": str(clip), "name": f"{clip.parent.name}/{clip.stem}", "seconds": round(sc["facts"]["duration"], 1),
             "size": d.get("shot_size"), "summary": d.get("summary"), "tags": d.get("tags", []),
-            "person": sc.get("person"), "steady": steady(sc),
+            "person": sc.get("person"), "voices": sc.get("voices", {}), "steady": steady(sc),
             "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
             "speech": [(s["start"], s["end"], s.get("text", "")) for s in sc.get("transcript", {}).get("segments", [])]}
 
 
-def matches(sc: dict, a) -> bool:
+def matches(sc: dict, a, wanted: set) -> bool:
     d, who = sc.get("description", {}), sc.get("person") or {}
     return (all(w.lower() in text(sc) for w in a.words)
             and (not a.size or d.get("shot_size") == a.size)
-            and (not a.person or a.person in (who.get("id"), who.get("name")))
+            and (not a.person or bool(wanted & {who.get("id"), who.get("name"), *sc.get("voices", {}).values()}))
             and (not a.steady or bool(steady(sc)))
             and (not a.pulls or bool(sc.get("focus", {}).get("pulls"))))
 
@@ -77,20 +78,21 @@ if __name__ == "__main__":
     ap.add_argument("words", nargs="*")
     ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
     ap.add_argument("--size", choices=["close-up", "medium", "wide"])
-    ap.add_argument("--person", help="a person's id or name from people.json")
+    ap.add_argument("--person", help="a person's id or name from people.json, seen or heard")
     ap.add_argument("--steady", action="store_true", help="only clips with a steady stretch")
     ap.add_argument("--pulls", action="store_true", help="only clips with a focus pull")
     ap.add_argument("--day", help="shooting day, YYYY-MM-DD")
     ap.add_argument("--json", action="store_true", help="full records, for an agent")
     a = ap.parse_args()
     found, behind = [], 0
+    wanted = people.called(a.person, a.library) if a.person else set()
     for c in library.clips(a.library):
         if (a.day and c.parent.name != a.day) or (sc := sidecar.read(c)) is None:  # folders are days
             continue
         sc, stale = passes.fresh(c, sc)
         behind += bool(stale)
-        sc["person"] = people.of(c, sc)
-        if matches(sc, a):
+        sc["person"], sc["voices"] = people.of(c, sc), people.voiced(c, sc)
+        if matches(sc, a, wanted):
             found.append(record(c, sc))
     print(json.dumps(found, indent=1) if a.json else "\n".join(map(line, found)) + f"\n{len(found)} clips")
     if behind:

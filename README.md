@@ -23,7 +23,8 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    and SRT/VTT subtitles.
 5. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
 6. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
-7. **Recognize people.** It groups faces into people across the whole library. You can add names to `people.json`.
+7. **Recognize people.** It groups faces into people across the whole library, and knows people's voices once you
+   name them in a transcript. You can add names to `people.json`.
 8. **Measure shake.** It follows the camera's motion on every frame and records, second by second, how much the
    camera shakes beyond its smoothed path. Moving hands and people in front of a locked-off camera don't count.
 9. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
@@ -110,8 +111,17 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
   lists it as steady throughout. The picture alone can't always tell a still camera from a subject that fills the frame.
 - People's names and skin levels live in `people.json` in your library. They never go in this repository. An edit
   there holds at once: search and render look a clip's person up when they read it.
+- A voice gets a name when you give it one: `python -m footage.transcribe NAME.transcript.json --names "Sean,Paul"`
+  records each named voice's print, with the file and time it came from, under that person in `people.json`. After
+  that, a new transcript and every clip at each run give a voice the name of the person it matches, and record that
+  print too, so the library learns each voice from more recordings. A wrong name is fixed by renaming that voice in its
+  transcript: its print moves to the new name. `python -m footage.find --person Sean` finds clips where Sean is seen or
+  heard. The match threshold (`people.VOICE`, 0.72) was tuned on four recordings of six people: one person scored
+  0.79 to 0.90 across files, two different people at most 0.63.
 
 Your library (clips, sidecars, `people.json`) and your renders stay on your machine. Keep them out of this repository.
+Face and voice prints are biometric data about the people you film: `people.json`, sidecars and `.transcript.json`
+files hold them, and none of them may ever be committed or shared.
 
 ## Credits
 

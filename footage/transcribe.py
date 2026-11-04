@@ -1,6 +1,6 @@
 """python -m footage.transcribe FILE: any recording's speaker-labelled transcript, as word JSON, Markdown, SRT and VTT.
 
-    python -m footage.transcribe FILE [--speakers N] [--names "Sean,Paul"] [--out DIR]
+    python -m footage.transcribe FILE [--speakers N] [--names "Sean,Paul"] [--out DIR] [--library DIR]
     python -m footage.transcribe DIR/NAME.json --names "Sean,Paul,Sean"    # rename voices and re-render, no re-run
 
 The words come from listen.hear, the same function as a clip's transcript section. NAME.json holds every word (text,
@@ -8,27 +8,37 @@ start, end, confidence, speaker) and the speakers' names; the other three files 
 to a word's speaker or a renamed voice is one re-render away, and voices given one name render as one person. NAME is
 the source's whole file name plus ".transcript", so outputs never meet a clip's sidecar or another file, and a run
 writes over no transcript but the one it re-renders.
+
+NAME.json also holds each voice's print. A voice that matches a known person (people.names) is given their name, and
+every named voice, matched or named by --names, is recorded under that person in the Library's people.json, so a
+renamed voice's print moves with its name. Prints are biometric: keep transcripts and people.json out of git.
 """
 import argparse
 import json
 from pathlib import Path
 
-from . import idle, listen
+from . import idle, listen, people
 
 PARAGRAPH_GAP = 2.0  # seconds of silence that start a new paragraph for the same voice
 CUE_CHARS, CUE_LINE, CUE_SECONDS, CUE_GAP = 84, 42, 6.0, 0.7  # subtitle cues: two lines of 42, at most 6 s
 
 
-def transcribe(media: Path, speakers: int | None) -> dict:
+def transcribe(media: Path, speakers: int | None, lib: Path) -> dict:
     a = listen.audio(media)
-    lines, _ = listen.hear(a, speakers) if a.size else ([], {})
+    lines, prints = listen.hear(a, speakers) if a.size else ([], {})
     words = [w for line in lines for w in line["words"]]
-    order = list(dict.fromkeys(w["speaker"] for w in words if w["speaker"] is not None))
+    order = list(dict.fromkeys(w["speaker"] for w in words))
     for w in words:  # voices numbered by first appearance, so --names goes in the order people speak
-        w["speaker"] = order.index(w["speaker"]) if w["speaker"] is not None else len(order)
-    unknown = ["Unknown"] if any(w["speaker"] == len(order) for w in words) else []
+        w["speaker"] = order.index(w["speaker"])
+    voices = []
+    for i, k in enumerate(order):
+        said = [w for w in words if w["speaker"] == i]
+        voices.append({"voice": i, "start": said[0]["start"], "end": said[-1]["end"],
+                       "seconds": round(sum(w["end"] - w["start"] for w in said), 1),
+                       "print": [round(float(x), 4) for x in prints[k]]})
+    found = people.names([v["print"] for v in voices], people.known(lib / "people.json"), people.at(media, lib))
     return {"source": str(media.resolve()), "duration": round(a.size / listen.RATE, 2), "listen": listen.identity({}),
-            "speakers": [f"Speaker {i + 1}" for i in range(len(order))] + unknown, "words": words}
+            "speakers": [n or f"Speaker {i + 1}" for i, n in enumerate(found)], "voices": voices, "words": words}
 
 
 def grouped(words, breaks):
@@ -101,6 +111,7 @@ def main() -> None:
     ap.add_argument("--speakers", type=int, help="how many voices, when known: clustering is much better")
     ap.add_argument("--names", default="", help="names in the order the voices first speak")
     ap.add_argument("--out", type=Path, help="output folder; default: beside FILE")
+    ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library", help="whose people.json knows the voices")
     a = ap.parse_args()
     idle()
     out = a.out or a.file.resolve().parent
@@ -110,9 +121,16 @@ def main() -> None:
     dest = Path(f"{name(doc['source'] if rerender else str(a.file.resolve()), out)}.json")
     if dest.exists() and not (rerender and dest.resolve() == a.file.resolve()):
         raise SystemExit(f"{dest} exists: re-render from it, or delete it to transcribe again")
-    doc = doc or transcribe(a.file, a.speakers)
+    doc = doc or transcribe(a.file, a.speakers, a.library)
     for i, given in enumerate(a.names.split(",")[:len(doc["speakers"])]):
         doc["speakers"][i] = given.strip() or doc["speakers"][i]
+    if "voices" in doc:  # a transcript from before voices had prints has nothing to record, or to take away
+        named: dict = {}
+        for v in doc["voices"]:  # a voice still called by its number is nobody yet
+            if doc["speakers"][v["voice"]] != f"Speaker {v['voice'] + 1}":
+                named.setdefault(doc["speakers"][v["voice"]], []).append({**v, "by": "transcript"})
+        source = people.at(Path(doc["source"]), a.library)
+        people.update(a.library, lambda entries: people.heard(entries, source, named))
     out.mkdir(parents=True, exist_ok=True)
     print(f"{render(doc, out)}.{{json,md,srt,vtt}}: {len(doc['words'])} words, voices: {', '.join(dict.fromkeys(doc['speakers']))}")
 

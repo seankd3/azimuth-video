@@ -1,12 +1,22 @@
-"""Who appears across the Library: faces grouped into people by fingerprint, with what you've said about each.
+"""Who appears across the Library: faces grouped into people by fingerprint, voices known by name, and what you've
+said about each.
 
-`people.json` beside the day folders lists each person: an id, the clips they're in, a fingerprint, and two things only
-you fill in: a `name`, and `skin_stops`, where their lit cheek should sit (stops above 18% grey). Skin level is a
-judgement, not a measurement: no frame can tell darker skin from underexposure, so the machine never guesses it.
-Entries that share a name are one person. Rebuilding keeps ids, names and skin levels, and a person you named or gave
-a skin level stays listed while none of their clips is measured, so what you wrote is never lost. A clip's subject is
-looked up here when a reader asks (people.of), so an edited name or skin level holds at once.
+`people.json` beside the day folders lists each person: an id, the clips their face is in, a face fingerprint, their
+`voices`, and two things only you fill in: a `name`, and `skin_stops`, where their lit cheek should sit (stops above
+18% grey). Skin level is a judgement, not a measurement: no frame can tell darker skin from underexposure, so the
+machine never guesses it. Entries that share a name are one person. Rebuilding keeps ids, names, skin levels and
+voices, and a person you named, gave a skin level or whose voice is known stays listed while none of their clips is
+measured, so what you wrote is never lost. A clip's subject is looked up here when a reader asks (people.of), so an
+edited name or skin level holds at once.
+
+A voice is known once it has a name: naming a voice in a transcript (python -m footage.transcribe NAME.json --names)
+records its print, with the file and time it came from, under that person. A new transcript, and each clip's
+transcript at every build, gives a voice the name of the known person it matches (VOICE), and that print is recorded
+too, so the registry learns. A print records who decided it: "transcript" (named or accepted in a transcript) or
+"build" (matched by a build). A build never changes the prints of a recording named in a transcript. Prints are
+biometric: people.json stays in the Library, never in git.
 """
+import fcntl
 import json
 import os
 from functools import cache
@@ -19,6 +29,8 @@ from .passes import fresh
 
 SAME = 0.363  # SFace cosine similarity at which two faces are the same person (OpenCV's recommended threshold)
 ACROSS = 0.45  # stricter across clips, comparing every member: splitting one person is harmless, merging two is not
+VOICE = 0.72  # TitaNet cosine at which a voice is a known person's: on four recordings one person scored 0.79 to 0.90
+#              across files, and two different people at most 0.63
 
 
 def unit(v) -> np.ndarray:
@@ -43,18 +55,33 @@ def tracks(measured: dict) -> list[dict]:
     return out
 
 
-def build(lib: Path, report: list) -> None:
+def update(lib: Path, change) -> list:
+    """Change people.json as one step: `change` gets its entries and returns the new ones. Every writer goes through
+    here, under a lock on the Library folder, so a build and a transcript naming a voice never lose each other's edit."""
+    lib.mkdir(parents=True, exist_ok=True)
     path = lib / "people.json"
-    known = json.loads(path.read_text())["people"] if path.exists() else []
+    fd = os.open(lib, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        entries = change(json.loads(path.read_text())["people"] if path.exists() else [])
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps({"people": entries}, indent=1))
+        os.rename(tmp, path)
+        return entries
+    finally:
+        os.close(fd)
+
+
+def build(lib: Path, report: list) -> None:
     clips = {}
     for clip in library.clips(lib):
         try:
             sc = sidecar.read(clip)
         except ValueError:
             continue
-        if sc and "measured" in fresh(clip, sc)[0]:
-            clips[clip] = sc
-    found = [(clip, t) for clip, sc in clips.items() for t in tracks(sc["measured"])]
+        if sc:
+            clips[clip] = fresh(clip, sc)[0]
+    found = [(clip, t) for clip, sc in clips.items() if "measured" in sc for t in tracks(sc["measured"])]
     people = []
     if len(found) > 1:
         from scipy.cluster.hierarchy import fcluster, linkage
@@ -65,28 +92,104 @@ def build(lib: Path, report: list) -> None:
             people.append({"print": unit(np.mean([t["print"] for _, t in members], axis=0)), "tracks": members})
     elif found:
         people = [{"print": found[0][1]["print"], "tracks": found}]
-    # Carry ids and names over from the last build; new people get the next free id.
-    used = set()
-    for p in people:
-        match = max((k for k in known if k["id"] not in used), key=lambda k: float(unit(k["print"]) @ p["print"]), default=None)
-        if match is not None and float(unit(match["print"]) @ p["print"]) >= SAME:
-            p["id"], p["name"], p["skin_stops"] = match["id"], match.get("name"), match.get("skin_stops")
-        else:
-            taken = {k["id"] for k in known} | {q.get("id") for q in people}
-            p["id"], p["name"], p["skin_stops"] = next(f"p{i:02d}" for i in range(1, 999) if f"p{i:02d}" not in taken), None, None
-        used.add(p["id"])
-        p["clips"] = sorted({library.name_of(clip) for clip, _ in p["tracks"]})
-    for p in people:  # a skin level given to one entry of a named person holds for all of them
-        p["skin_stops"] = next((q["skin_stops"] for q in people if q["skin_stops"] is not None and p["name"]
-                                and q["name"] == p["name"]), p["skin_stops"])
-    entries = [{"id": p["id"], "name": p["name"], "skin_stops": p["skin_stops"], "clips": p["clips"],
-                "print": [round(float(v), 3) for v in p["print"]]} for p in people]
-    entries += [{**k, "clips": []} for k in known if k["id"] not in used and (k.get("name") or k.get("skin_stops") is not None)]
-    entries.sort(key=lambda e: e["id"])
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps({"people": entries}, indent=1))
-    os.rename(tmp, path)
+
+    def change(known: list) -> list:
+        # Carry ids, names and voices over from the last build; new people get the next free id.
+        faces = [k for k in known if k.get("print")]
+        used = set()
+        for p in people:
+            match = max((k for k in faces if k["id"] not in used), key=lambda k: float(unit(k["print"]) @ p["print"]), default=None)
+            if match is not None and float(unit(match["print"]) @ p["print"]) >= SAME:
+                p["id"], p["name"], p["skin_stops"] = match["id"], match.get("name"), match.get("skin_stops")
+                p["voices"] = match.get("voices", [])
+            else:
+                taken = {k["id"] for k in known} | {q.get("id") for q in people}
+                p["id"], p["name"], p["skin_stops"], p["voices"] = next(f"p{i:02d}" for i in range(1, 999) if f"p{i:02d}" not in taken), None, None, []
+            used.add(p["id"])
+            p["clips"] = sorted({library.name_of(clip) for clip, _ in p["tracks"]})
+        for p in people:  # a skin level given to one entry of a named person holds for all of them
+            p["skin_stops"] = next((q["skin_stops"] for q in people if q["skin_stops"] is not None and p["name"]
+                                    and q["name"] == p["name"]), p["skin_stops"])
+        entries = [{"id": p["id"], "name": p["name"], "skin_stops": p["skin_stops"], "clips": p["clips"],
+                    "print": [round(float(v), 3) for v in p["print"]], "voices": p["voices"]} for p in people]
+        entries += [{**k, "clips": []} for k in known if k["id"] not in used
+                    and (k.get("name") or k.get("skin_stops") is not None or k.get("voices"))]
+        named = {v["at"] for e in entries for v in e.get("voices", []) if v["by"] == "transcript"}
+        for clip, sc in clips.items():  # each clip's voices that match a known person's are theirs, unless you named them
+            t = sc.get("transcript", {})
+            said = [v for v in t.get("speakers", []) if v.get("voiceprint")]
+            at = library.name_of(clip)
+            if at in named:
+                continue
+            spans = {v["id"]: [(g["start"], g["end"]) for g in t["segments"] if g["speaker"] == v["id"]] for v in said}
+            entries = heard(entries, at, {n: [{"voice": v["id"], "start": spans[v["id"]][0][0] if spans[v["id"]] else None,
+                                               "end": spans[v["id"]][-1][1] if spans[v["id"]] else None,
+                                               "seconds": v["seconds"], "by": "build", "print": v["voiceprint"]}]
+                                          for v, n in zip(said, names([v["voiceprint"] for v in said], entries, at)) if n})
+        return sorted(entries, key=lambda e: e["id"])
+
+    entries = update(lib, change)
     report.append(("people", f"{len(entries)} people", f"{sum(len(e['clips']) > 1 for e in entries)} in more than one clip"))
+
+
+def voices(entries: list, besides: str | None = None) -> dict:
+    """Each named person's voice: the mean of their voiceprints, weighted by the seconds each was heard, leaving out
+    the prints from `besides` (a file is matched only against what other files taught)."""
+    prints: dict = {}
+    for e in entries:
+        for v in e.get("voices", []):
+            if e.get("name") and v["at"] != besides:
+                prints.setdefault(e["name"], []).append(unit(v["print"]) * v["seconds"])
+    return {name: unit(np.sum(ps, axis=0)) for name, ps in prints.items()}
+
+
+def names(prints: list, entries: list, at: str) -> list:
+    """Who each of one file's voices is: the known person whose voice its print matches best, if at least VOICE, each
+    person at most once, the most alike pairs first; None for a voice nobody matches."""
+    known = voices(entries, at)
+    pairs = sorted(((float(unit(p) @ v), i, n) for i, p in enumerate(prints) for n, v in known.items()), reverse=True)
+    out: list = [None] * len(prints)
+    for score, i, n in pairs:
+        if score >= VOICE and out[i] is None and n not in out:
+            out[i] = n
+    return out
+
+
+def heard(entries: list, at: str, named: dict) -> list:
+    """The entries with the voiceprints from file `at` replaced by `named` (name: its prints), so a renamed voice's
+    print moves to its new name. A print goes to the first entry with that name, or to a new one."""
+    for e in entries:
+        e["voices"] = [v for v in e.get("voices", []) if v["at"] != at]
+    for name, prints in named.items():
+        e = next((e for e in sorted(entries, key=lambda e: e["id"]) if e.get("name") == name), None)
+        if e is None:
+            taken = {k["id"] for k in entries}
+            e = {"id": next(f"p{i:02d}" for i in range(1, 999) if f"p{i:02d}" not in taken), "name": name,
+                 "skin_stops": None, "clips": [], "print": None, "voices": []}
+            entries.append(e)
+        e["voices"] += [{"at": at, **v, "print": [round(float(x), 4) for x in v["print"]]} for v in prints]
+    return entries
+
+
+def at(media: Path, lib: Path) -> str:
+    """The one name a recording's voiceprints are recorded under: DAY/FILE for a Library clip, else its full path."""
+    media = media.resolve()
+    return library.name_of(media) if media.parent.parent == lib.resolve() else str(media)
+
+
+def voiced(clip: Path, sc: dict) -> dict:
+    """Who the clip's voices are, by voice id: the person a print from this clip was recorded under, when it is the
+    print of a voice in the clip's transcript as it is now, so a transcript redone since names nobody until the next
+    build, and a voice named in a transcript of the clip is named here too."""
+    recorded = [(v["print"], e["name"]) for e in known(clip.parent.parent / "people.json") for v in e.get("voices", [])
+                if v["at"] == library.name_of(clip)]
+    return {v["id"]: name for v in sc.get("transcript", {}).get("speakers", []) for p, name in recorded
+            if v.get("voiceprint") == p}
+
+
+def called(person: str, lib: Path) -> set:
+    """Every form a person may be asked for by: the id or name given, and the names of entries with that id."""
+    return {person} | {e["name"] for e in known(lib / "people.json") if e["id"] == person and e.get("name")}
 
 
 @cache
