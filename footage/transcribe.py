@@ -19,7 +19,7 @@ PARAGRAPH_GAP = 2.0  # seconds of silence that start a new paragraph for the sam
 CUE_CHARS, CUE_LINE, CUE_SECONDS, CUE_GAP = 84, 42, 6.0, 0.7  # subtitle cues: two lines of 42, at most 6 s
 
 
-def transcribe(media: Path, speakers: int) -> dict:
+def transcribe(media: Path, speakers: int | None) -> dict:
     a = listen.audio(media)
     lines, _ = listen.hear(a, speakers) if a.size else ([], {})
     words = [w for line in lines for w in line["words"]]
@@ -98,7 +98,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="footage.transcribe", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file", type=Path, help="any audio or video file ffmpeg reads, or a .json this wrote")
-    ap.add_argument("--speakers", type=int, default=-1, help="how many voices, when known: clustering is much better")
+    ap.add_argument("--speakers", type=int, help="how many voices, when known: clustering is much better")
     ap.add_argument("--names", default="", help="names in the order the voices first speak")
     ap.add_argument("--out", type=Path, help="output folder; default: beside FILE")
     a = ap.parse_args()

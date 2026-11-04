@@ -18,8 +18,9 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    and gamut), stored as all-intra 12-bit 4:4:4 HEVC in the day's `.developed/` folder. Every step below reads a RAW
    clip's pictures from there, and its sidecar ids record the development, so a new development redoes them.
 3. **Describe.** A local vision model writes a summary, tags, shot size, camera movement and usable moments for each clip.
-4. **Transcribe.** Parakeet transcribes the speech, and a diarizer labels the speakers. The same transcriber runs on
-   any recording: `python -m footage.transcribe FILE` writes its words, Markdown and SRT/VTT subtitles.
+4. **Transcribe.** Parakeet transcribes the speech, and voiceprints of every 1.5 s of it, clustered, tell the voices
+   apart. The same transcriber runs on any recording: `python -m footage.transcribe FILE` writes its words, Markdown
+   and SRT/VTT subtitles.
 5. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
 6. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
 7. **Recognize people.** It groups faces into people across the whole library. You can add names to `people.json`.
@@ -73,8 +74,8 @@ This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Sp
 - `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC, zscale and 10/12-bit x265 (for example, a BtbN build).
 - LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`), for RAW clips.
 - LM Studio, serving `qwen/qwen3.5-35b-a3b`, for the descriptions.
-- Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), the pyannote segmentation model and NeMo
-  TitaNet (sherpa-onnx), and Parakeet TDT 0.6B v2. Keep the folder read-only (`chmod -R a-w`): a section is identified
+- Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), NeMo TitaNet
+  (sherpa-onnx), and Parakeet TDT 0.6B v2. Keep the folder read-only (`chmod -R a-w`): a section is identified
   by its models' file names and sizes, so a new model or version goes in under a new name, never over an old file.
 - Optional: [Gyroflow](https://github.com/gyroflow/gyroflow) for shots that shake too much for the built-in
   stabilizer. Since 1.7 it can measure motion from the picture alone (`--optical-correction 100`), and it corrects
