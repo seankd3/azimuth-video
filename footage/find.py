@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import library, passes, people, sidecar
 from .steady import SHAKE_MIN, handheld
+from .transcribe.formats import turns
 
 STEADY_SECONDS = 2  # shortest steady stretch worth listing
 
@@ -41,7 +42,7 @@ def text(sc: dict) -> str:
     d, t = sc.get("description", {}), sc.get("transcript", {})
     words = [d.get("summary", ""), d.get("action", ""), d.get("setting", ""), d.get("shot_size", ""), d.get("camera_movement", ""),
              *d.get("subjects", []), *d.get("tags", []), *(m["what"] for m in d.get("moments", [])),
-             *(seg.get("text", "") for seg in t.get("segments", [])), (sc.get("person") or {}).get("name") or "",
+             *(w["text"] for w in t.get("words", [])), (sc.get("person") or {}).get("name") or "",
              *sc.get("voices", {}).values()]
     return " ".join(words).lower()
 
@@ -52,7 +53,7 @@ def record(clip: Path, sc: dict) -> dict:
             "size": d.get("shot_size"), "summary": d.get("summary"), "tags": d.get("tags", []),
             "person": sc.get("person"), "voices": sc.get("voices", {}), "steady": steady(sc),
             "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
-            "speech": [(s["start"], s["end"], s.get("text", "")) for s in sc.get("transcript", {}).get("segments", [])]}
+            "speech": [(t["start"], t["end"], t["text"]) for t in turns(sc.get("transcript", {}).get("words", []))]}
 
 
 def matches(sc: dict, a, wanted: set) -> bool:

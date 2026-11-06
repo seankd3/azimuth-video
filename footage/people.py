@@ -116,16 +116,12 @@ def build(lib: Path, report: list) -> None:
                     and (k.get("name") or k.get("skin_stops") is not None or k.get("voices"))]
         named = {v["at"] for e in entries for v in e.get("voices", []) if v["by"] == "transcript"}
         for clip, sc in clips.items():  # each clip's voices that match a known person's are theirs, unless you named them
-            t = sc.get("transcript", {})
-            said = [v for v in t.get("speakers", []) if v.get("voiceprint")]
+            said = sc.get("transcript", {}).get("voices", [])
             at = library.name_of(clip)
             if at in named:
                 continue
-            spans = {v["id"]: [(g["start"], g["end"]) for g in t["segments"] if g["speaker"] == v["id"]] for v in said}
-            entries = heard(entries, at, {n: [{"voice": v["id"], "start": spans[v["id"]][0][0] if spans[v["id"]] else None,
-                                               "end": spans[v["id"]][-1][1] if spans[v["id"]] else None,
-                                               "seconds": v["seconds"], "by": "build", "print": v["voiceprint"]}]
-                                          for v, n in zip(said, names([v["voiceprint"] for v in said], entries, at)) if n})
+            entries = heard(entries, at, {n: [{**v, "by": "build"}]
+                                          for v, n in zip(said, names([v["print"] for v in said], entries, at)) if n})
         return sorted(entries, key=lambda e: e["id"])
 
     entries = update(lib, change)
@@ -183,8 +179,8 @@ def voiced(clip: Path, sc: dict) -> dict:
     build, and a voice named in a transcript of the clip is named here too."""
     recorded = [(v["print"], e["name"]) for e in known(clip.parent.parent / "people.json") for v in e.get("voices", [])
                 if v["at"] == library.name_of(clip)]
-    return {v["id"]: name for v in sc.get("transcript", {}).get("speakers", []) for p, name in recorded
-            if v.get("voiceprint") == p}
+    return {v["voice"]: name for v in sc.get("transcript", {}).get("voices", []) for p, name in recorded
+            if v["print"] == p}
 
 
 def called(person: str, lib: Path) -> set:

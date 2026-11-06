@@ -1,13 +1,13 @@
-"""What was said in a clip, when, and by which voice: Parakeet transcript and clustered TitaNet voiceprints."""
+"""What was said in a recording, when, and by which voice: Parakeet words and clustered TitaNet voiceprints."""
 import subprocess
 from functools import cache
 from pathlib import Path
 
 import numpy as np
 
-from . import models, probe
+from .. import models, probe
 
-VERSION = 2  # bump when transcription, voices or voiceprints change
+VERSION = 3  # bump when transcription, voices, voiceprints or the transcript's shape change
 PARAKEET = models.FOLDER / "parakeet-tdt-0.6b-v2"
 TITANET = models.FOLDER / "nemo_en_titanet_small.onnx"
 RATE = 16000
@@ -19,7 +19,7 @@ EVIDENCE = 4  # prints (about 3.75 s of speech) a voice needs to be told apart f
 
 
 def identity(sc: dict) -> dict:
-    return {"listen": VERSION, "models": models.identity(PARAKEET, TITANET)}
+    return {"transcribe": VERSION, "models": models.identity(PARAKEET, TITANET)}
 
 
 @cache
@@ -173,23 +173,18 @@ def spans_of(spans: list, labels: list) -> dict:
     return out
 
 
-def hear(a: np.ndarray, speakers: int | None = None) -> tuple[list, dict]:
-    """What was said and by which voice: each recognized line with its words, and each voice's print. Every 1.5 s of
-    speech gets a voiceprint, the prints are clustered into the voices they show, and each word goes to the voice
-    whose prints overlap it most. Where the voice changes, a 1.5 s print straddles both voices, so the words there are
-    judged again on 0.75 s prints, each given the nearest voice. Told `speakers`, the voices are split to that many
-    if they show fewer, and joined, most alike first, if they show more: a joined voice judges its words as the
-    voices it is made of. A line goes to the voice its words overlap most."""
-    lines = []
-    for r in recognizer().recognize(a, sample_rate=RATE):
-        text = r.text.strip()
-        if text:
-            lines.append({"start": round(r.start, 2), "end": round(r.end, 2), "text": text,
-                          "confidence": confidence(r.logprobs), "words": words(r)})
-    if not lines:
-        return lines, {}
-    every = [w for line in lines for w in line["words"]]
-    coarse = windows([(line["start"], line["end"]) for line in lines], WINDOW, HOP)
+def hear(a: np.ndarray, speakers: int | None = None) -> dict:
+    """A transcript: every word (text, start, end, confidence, speaker) and every voice (its number, first and last
+    word, seconds of speech and print), voices numbered by first appearance. Every 1.5 s of speech gets a voiceprint,
+    the prints are clustered into the voices they show, and each word goes to the voice whose prints overlap it most.
+    Where the voice changes, a 1.5 s print straddles both voices, so the words there are judged again on 0.75 s
+    prints, each given the nearest voice. Told `speakers`, the voices are split to that many if they show fewer, and
+    joined, most alike first, if they show more: a joined voice judges its words as the voices it is made of."""
+    lines = [r for r in recognizer().recognize(a, sample_rate=RATE) if r.text.strip()] if a.size >= RATE else []
+    every = [w for r in lines for w in words(r)]
+    if not every:
+        return {"words": [], "voices": []}
+    coarse = windows([(round(r.start, 2), round(r.end, 2)) for r in lines], WINDOW, HOP)
     X = prints(a, coarse)
     labels = join(X, clusters(X))
     if speakers and speakers > len(set(labels)):
@@ -212,21 +207,14 @@ def hear(a: np.ndarray, speakers: int | None = None) -> tuple[list, dict]:
         labels = [group[k] for k in labels]
         for w in every:
             w["speaker"] = group[w["speaker"]]
-    by_word = spans_of([(w["start"], w["end"]) for w in every], [w["speaker"] for w in every])
-    for line in lines:
-        line["speaker"] = voice(line, by_word)
-    return lines, {k: v for k, v in centres(X, labels).items() if k in by_word}
-
-
-def listen(clip: Path, sc: dict) -> dict:
-    a = audio(clip)
-    if a.size < RATE:
-        return {"speech_seconds": 0.0, "segments": [], "speakers": []}
-    lines, voices = hear(a)
-    segments = [{"start": l["start"], "end": l["end"], "text": l["text"], "confidence": l["confidence"],
-                 "speaker": None if l["speaker"] is None else f"s{l['speaker']}"} for l in lines]
-    said = [w for l in lines for w in l["words"]]
-    speakers = [{"id": f"s{k}", "seconds": round(sum(w["end"] - w["start"] for w in said if w["speaker"] == k), 1),
-                 "voiceprint": [round(float(x), 4) for x in v]} for k, v in sorted(voices.items())]
-    return {"speech_seconds": round(sum(s["end"] - s["start"] for s in segments), 1),
-            "segments": segments, "speakers": speakers}
+    centre = centres(X, labels)
+    order = list(dict.fromkeys(w["speaker"] for w in every))
+    for w in every:  # voices numbered by first appearance, so names can be given in the order people speak
+        w["speaker"] = order.index(w["speaker"])
+    voices = []
+    for i, k in enumerate(order):
+        said = [w for w in every if w["speaker"] == i]
+        voices.append({"voice": i, "start": said[0]["start"], "end": said[-1]["end"],
+                       "seconds": round(sum(w["end"] - w["start"] for w in said), 1),
+                       "print": [round(float(x), 4) for x in centre[k]]})
+    return {"words": every, "voices": voices}

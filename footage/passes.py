@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import describe, focus, listen, measure, probe, steady
+from . import describe, focus, measure, probe, steady, transcribe
 
 
 @dataclass
@@ -24,7 +24,7 @@ class Pass:
 PASSES = [
     # Two requests keep the model busy while the next frames are cut.
     Pass("description", describe.describe, describe.identity, 2, describe.available),
-    Pass("transcript", listen.listen, listen.identity, 1),
+    Pass("transcript", transcribe.clip, transcribe.identity, 1),
     Pass("measured", measure.measure, measure.identity, 4),
     # These two read every frame on the GPU decoder.
     Pass("focus", focus.focus, focus.identity, 2),

@@ -20,7 +20,9 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 3. **Describe.** A local vision model writes a summary, tags, shot size, camera movement and usable moments for each clip.
 4. **Transcribe.** Parakeet transcribes the speech, and voiceprints of every 1.5 s of it, clustered, tell the voices
    apart. The same transcriber runs on any recording: `python -m footage.transcribe FILE` writes its words, Markdown
-   and SRT/VTT subtitles.
+   and SRT/VTT subtitles. A clip's sidecar and a recording's `.transcript.json` hold one shape: every word with its
+   voice, and every voice with its print. The code is the `footage/transcribe/` package: `hear.py` hears,
+   `formats.py` writes the files.
 5. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
 6. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
 7. **Recognize people.** It groups faces into people across the whole library, and knows people's voices once you
@@ -111,11 +113,11 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
   lists it as steady throughout. The picture alone can't always tell a still camera from a subject that fills the frame.
 - People's names and skin levels live in `people.json` in your library. They never go in this repository. An edit
   there holds at once: search and render look a clip's person up when they read it.
-- A voice gets a name when you give it one: `python -m footage.transcribe NAME.transcript.json --names "Sean,Paul"`
+- A voice gets a name when you give it one: `python -m footage.transcribe NAME.transcript.json --names "Ana,Ben"`
   records each named voice's print, with the file and time it came from, under that person in `people.json`. After
   that, a new transcript and every clip at each run give a voice the name of the person it matches, and record that
   print too, so the library learns each voice from more recordings. A wrong name is fixed by renaming that voice in its
-  transcript: its print moves to the new name. `python -m footage.find --person Sean` finds clips where Sean is seen or
+  transcript: its print moves to the new name. `python -m footage.find --person Ana` finds clips where Ana is seen or
   heard. The match threshold (`people.VOICE`, 0.72) was tuned on four recordings of six people: one person scored
   0.79 to 0.90 across files, two different people at most 0.63.
 
