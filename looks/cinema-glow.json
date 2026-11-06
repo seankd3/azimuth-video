@@ -1,10 +1,10 @@
 {
-  "about": "Cinema printed a little darker and harder, with a soft glow around lamps, speculars and backlit edges, and light lens falloff.",
+  "about": "Cinema printed a little darker and harder, with a soft glow around lamps, speculars and backlit edges, and edges that fall off to frame the shot.",
   "lut": "vision3-250d_2393.cube",
   "exposure": -0.35,
   "contrast": 1.15,
   "white": 0.96,
   "halation": 2.6,
   "halation_spread": 1.6,
-  "vignette": 0.3
+  "vignette": 1.2
 }

@@ -24,6 +24,7 @@ SIZE = 33
 FACE_SHOT = 0.2  # a face at least this share of the frame height, in at least half the samples, makes a face shot
 FACE_LIFT = 1.0  # most a face shot's exposure moves to put its person at their skin level
 WHITE = float(np.log2(0.9 / 0.18))  # diffuse white, a white wall or page, in stops above 18% grey
+VIGNETTE_FLAT = 0.35  # share of the way to the corners a vignette leaves untouched
 NIGHT = (0.005, 0.09)  # scene light where a night shot's colour is faded most, and where it is full again
 
 
@@ -42,7 +43,7 @@ class Look:
     halation_tint: tuple[float, float, float] = (1.0, 0.32, 0.08)
     halation_from: float = 0.12  # stops below the camera's clipping point at which the glow starts
     halation_spread: float = 1.0  # glow radius relative to the default
-    vignette: float = 0.0  # stops darker in the corners, as lens falloff
+    vignette: float = 0.0  # stops darker in the corners, from a flat centre
     key: float = 0.0  # how much of the scene's own key is kept: 1 keeps a bright room brighter than a dim one
     dark: float | None = None  # a dark shot (one the target would brighten) is shown as exposed, moved this many stops
     #                           (the camera was exposed for its lit part); None brightens it to the target
@@ -231,7 +232,9 @@ def write_display(folder: Path) -> tuple[Path, Path]:
 
 
 def write_vignette(path: Path, size: tuple[int, int], look: Look, squeeze: float = 1.0) -> Path:
-    """A 16-bit mask of lens falloff: cos^4 of the distance from the centre, the corners look.vignette stops darker.
+    """A 16-bit mask that darkens the edges: untouched out to VIGNETTE_FLAT of the way to the corners, then rolling
+    off smoothly to look.vignette stops darker in the corners. A natural cos^4 lens falloff starts in the middle and
+    reads as a darker picture rather than darker edges; a flat centre keeps the subject as graded and frames it.
 
     A lens darkens in a circle on the sensor, so through an anamorphic lens the falloff desqueezes to an oval as wide
     as the squeeze: the top and bottom edges darken too, not only the sides of a wide frame."""
@@ -239,7 +242,8 @@ def write_vignette(path: Path, size: tuple[int, int], look: Look, squeeze: float
     w, h = size
     y, x = np.ogrid[:h, :w]
     d = np.hypot((x - w / 2) / squeeze, y - h / 2) / np.hypot(w / 2 / squeeze, h / 2)
-    cv2.imwrite(str(path), np.round(np.cos(np.arccos(2 ** (-look.vignette / 4)) * d) ** 4 * 65535).astype(np.uint16))
+    t = np.clip((d - VIGNETTE_FLAT) / (1 - VIGNETTE_FLAT), 0, 1)
+    cv2.imwrite(str(path), np.round(2.0 ** (-look.vignette * t * t * (3 - 2 * t)) * 65535).astype(np.uint16))
     return path
 
 
