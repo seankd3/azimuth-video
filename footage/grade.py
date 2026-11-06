@@ -43,7 +43,7 @@ class Look:
     halation_spread: float = 1.0  # glow radius relative to the default
     vignette: float = 0.0  # stops darker in the corners, as lens falloff
     key: float = 0.0  # how much of the scene's own key is kept: 1 keeps a bright room brighter than a dim one
-    lift: float = 1.0  # share of the brightening a dark shot gets: below 1, night stays night
+    lift: float = 1.0  # share of the brightening a dark shot gets: 0 shows it as exposed, for what the camera exposed for
     headroom: float | None = None  # most stops the 99th percentile may land above diffuse white; None: no limit
     shadows: float = 0.0  # share of the shadows' own grey balance applied: 1 makes grey grey at every level
 
@@ -73,7 +73,7 @@ def exposure(sc: dict, look: Look) -> tuple[float, float]:
     # Reinhard's automatic key (2002): a key of k keeps 2k stops of the scene's brightness.
     k = 2 * (avg - low) / (high - low) - 1 if high > low else 0.0
     stops = look.exposure + look.key * 2 * k - avg
-    stops = stops if stops <= 0 else stops * look.lift  # ETTR comes down fully; a dark shot is lifted only partly
+    stops = stops if stops <= 0 else stops * look.lift  # ETTR comes down fully; a dark shot is lifted only by lift
     if look.headroom is not None:  # and never so far that the brightest unclipped light goes past the shoulder
         stops = min(stops, WHITE + look.headroom - high)
     face, skin = measured.get("face"), (sc.get("person") or {}).get("skin_stops")
