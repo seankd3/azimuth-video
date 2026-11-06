@@ -39,7 +39,7 @@ it stops, and search leaves it out and says how many clips it skipped sections o
      `python -m footage.grade` lists them;
    - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
      lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a night shot is lifted only partly.
-     The highlights are kept under the shoulder (the look's `key`, `lift`, `headroom` and `shadows` settings);
+     The highlights are kept under the shoulder (the look's `key`, `lift`, `headroom`, `shadows` and `tint` settings);
    - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
      most a 6% zoom, so the deliberate move stays and the picture keeps its 16-bit precision.
 

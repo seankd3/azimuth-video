@@ -34,6 +34,7 @@ class Look:
     exposure: float = -0.15  # log-average scene luminance relative to 18% grey; below 0 is low-key
     contrast: float = 1.0  # slope in ACEScct about 18% grey before the film: above 1 is a harder negative
     warmth: float = 0.0  # stops of red over blue in the scene light before the film: below 0 is cooler
+    tint: float = 0.0  # stops of magenta over green in the scene light: above 0 takes out fluorescent green
     black: float | None = None  # display level the print's black is moved to; None leaves the print's own
     white: float | None = None  # display level the print's white is moved to (prints top out near 0.87)
     halation: float = 0.0  # how much light scatters back through the red-sensitive layer
@@ -82,9 +83,9 @@ def exposure(sc: dict, look: Look) -> tuple[float, float]:
 
 
 def balance(sc: dict, look: Look) -> np.ndarray:
-    """Per-channel gain in scene-linear Rec.709: white balance to the look's warmth, times exposure."""
+    """Per-channel gain in scene-linear Rec.709: white balance to the look's warmth and tint, times exposure."""
     neutral = np.array(sc["assumed"].get("neutral_rgb") or sc["measured"]["neutral_rgb"])  # a hand-set neutral wins
-    wb = neutral[1] / neutral * 2.0 ** (look.warmth * np.array([0.5, 0, -0.5]))
+    wb = neutral[1] / neutral * 2.0 ** (look.warmth * np.array([0.5, 0, -0.5]) + look.tint * np.array([0.5, -0.5, 0.5]))
     wb /= color.luminance(wb)  # white balance alone must not change brightness
     return wb * 2.0 ** sum(exposure(sc, look))
 

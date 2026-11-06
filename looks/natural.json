@@ -1,9 +1,10 @@
 {
-  "about": "True to life: each shot balanced in its lights and its shade, a bright room kept bright and a night kept dark, shown as the camera saw it with no film, glow or vignette.",
+  "about": "True to life: each shot balanced in its lights and its shade, fluorescent green taken out, a bright room kept bright and a night kept dark, shown as the camera saw it with no film, glow or vignette.",
   "lut": "natural.cube",
   "exposure": 0.0,
   "key": 0.75,
   "lift": 0.5,
   "headroom": 2.0,
-  "shadows": 1.0
+  "shadows": 1.0,
+  "tint": 0.03
 }
