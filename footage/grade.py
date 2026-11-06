@@ -23,6 +23,7 @@ DEFAULT = config.load().get("look", "cinema")  # the house look: a timeline's ow
 SIZE = 33
 FACE_SHOT = 0.2  # a face at least this share of the frame height, in at least half the samples, makes a face shot
 FACE_LIFT = 1.0  # most a face shot's exposure moves to put its person at their skin level
+WHITE = float(np.log2(0.9 / 0.18))  # diffuse white, a white wall or page, in stops above 18% grey
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,10 @@ class Look:
     halation_from: float = 0.12  # stops below the camera's clipping point at which the glow starts
     halation_spread: float = 1.0  # glow radius relative to the default
     vignette: float = 0.0  # stops darker in the corners, as lens falloff
+    key: float = 0.0  # how much of the scene's own key is kept: 1 keeps a bright room brighter than a dim one
+    lift: float = 1.0  # share of the brightening a dark shot gets: below 1, night stays night
+    headroom: float | None = None  # most stops the 99th percentile may land above diffuse white; None: no limit
+    shadows: float = 0.0  # share of the shadows' own grey balance applied: 1 makes grey grey at every level
 
 
 @cache
@@ -62,7 +67,14 @@ def exposure(sc: dict, look: Look) -> tuple[float, float]:
     machine cannot tell darker skin from underexposure, so it never brightens a face it has no level for.
     """
     measured = sc["measured"]
-    stops = look.exposure - measured["exposure_stops"]
+    avg, (low, high) = measured["exposure_stops"], measured["range_stops"]
+    # The scene's key: where its average sits in its own range of light, -1 (low-key) to 1 (high-key), as in
+    # Reinhard's automatic key (2002): a key of k keeps 2k stops of the scene's brightness.
+    k = 2 * (avg - low) / (high - low) - 1 if high > low else 0.0
+    stops = look.exposure + look.key * 2 * k - avg
+    stops = stops if stops <= 0 else stops * look.lift  # ETTR comes down fully; a dark shot is lifted only partly
+    if look.headroom is not None:  # and never so far that the brightest unclipped light goes past the shoulder
+        stops = min(stops, WHITE + look.headroom - high)
     face, skin = measured.get("face"), (sc.get("person") or {}).get("skin_stops")
     if skin is None or not (face and face["height"] >= FACE_SHOT and face["in_frames"] * 2 >= face["of"]):
         return stops, 0.0
@@ -75,6 +87,25 @@ def balance(sc: dict, look: Look) -> np.ndarray:
     wb = neutral[1] / neutral * 2.0 ** (look.warmth * np.array([0.5, 0, -0.5]))
     wb /= color.luminance(wb)  # white balance alone must not change brightness
     return wb * 2.0 ** sum(exposure(sc, look))
+
+
+def shading(sc: dict, look: Look, lin: np.ndarray) -> np.ndarray:
+    """Per-pixel gain that makes the shadows' grey grey too, for scene-linear Rec.709 light before balance().
+
+    Mixed light can tint the shade apart from the lit surfaces (fluorescent green in the shade of a warm-lit room):
+    one balance can't make both grey. At and below the shadows' grey level the gain is the shadows' own balance
+    relative to the main one; at and above the main grey's level it is 1; between, it blends in stops. A hand-set
+    neutral, a shadow grey without evidence, or a look that keeps the shadows' tint leaves every gain 1."""
+    m = sc["measured"]
+    if not look.shadows or sc["assumed"].get("neutral_rgb") or m["shadow_gate"] is None or m["neutral_stops"] is None:
+        return np.ones_like(lin)
+    shade, white = np.array(m["shadow_rgb"]), np.array(m["neutral_rgb"])
+    gain = (white / shade) ** look.shadows
+    gain /= color.luminance(gain)
+    lo, hi = m["shadow_stops"], m["neutral_stops"]
+    s = np.log2(np.maximum(color.luminance(lin), 1e-9) / 0.18)
+    t = np.clip((s - lo) / (hi - lo), 0, 1)[..., None] if hi > lo else np.ones(s.shape + (1,))
+    return gain ** (1 - t)
 
 
 @cache
@@ -123,7 +154,8 @@ def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> Path:
     """This shot's picture LUT, taking the camera's code values."""
     grid = np.linspace(0, 1, SIZE)
     b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")  # .cube order: red changes fastest
-    lin = color.to_linear_709(np.stack([r, g, b], axis=-1).reshape(-1, 3), sc["assumed"]) * balance(sc, look)
+    lin = color.to_linear_709(np.stack([r, g, b], axis=-1).reshape(-1, 3), sc["assumed"])
+    lin = lin * shading(sc, look, lin) * balance(sc, look)
     pivot = color.to_acescct(np.full(3, 0.18))[0]
     picture = sample(read_cube(look.lut), pivot + (color.to_acescct(lin) - pivot) * look.contrast)
     picture = np.stack([np.interp(picture[:, c], *grey_axis(look.lut)[c]) for c in range(3)], axis=-1)

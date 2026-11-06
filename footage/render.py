@@ -6,6 +6,9 @@ whole edit is printed in one look (grade.py): the timeline's `metadata["footage"
 is written beside the timeline as "EDIT - LOOK.mp4", so one edit can be rendered in several looks. An audio clip may set
 `metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21). Kdenlive and Resolve open the same file.
 The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
+A timeline may set `metadata["footage"]["frame"]` to "full" for the whole recorded frame, desqueezed (never
+stabilized: there is no margin to move in), `["height"]` for a smaller master, and `["crf"]` (default 16) for a
+smaller file: a documentation copy is {"look": "natural", "frame": "full", "height": 1080, "crf": 28, "fades": [0, 0]}.
 A clip whose media reference is a GeneratorReference of kind "title" is a title card: its `text` on black, fading in
 and out, with optional `size` (share of the frame height), `font` (a fontconfig name) and `fade` (seconds).
 Stills go through exactly the same picture graph, so an approved still is what the video will show.
@@ -70,11 +73,12 @@ def title(clip: otio.schema.Clip, size: tuple[int, int], rate: str, frames: int,
             f"x=(w-text_w)/2:y=(h-text_h)/2:alpha='{alpha}',trim=end_frame={frames},format=gbrp16le[{tag}]")
 
 
-def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: str) -> str:
-    """Filters from camera frames to the desqueezed 2.39:1 picture at size, as 16-bit RGB: still, or stabilized by `fix`."""
+def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: str, full: bool = False) -> str:
+    """Filters from camera frames to the desqueezed picture at size, as 16-bit RGB: the 2.39:1 window (or the whole
+    frame), still, or stabilized by `fix`."""
     w, h = size
     if fix is None:
-        cw, ch = view.window(sc)
+        cw, ch = (sc["facts"]["width"], sc["facts"]["height"]) if full else view.window(sc)
         return f"crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le"
     z, shift, turn = fix["zoom"], fix["fix"], fix["roll"]
     fw, fh = (int(np.ceil(v * z / 2)) * 2 for v in view.full_frame(sc, size))
@@ -100,23 +104,26 @@ def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look
     """Filter chains taking the framed picture at [src] (framing()) to the graded 16-bit RGB picture at [tag]."""
     w, h = size
     lut = grade.write_luts(sc, tmp, tag, look)
-    shaper, halo, glow = grade.write_halation(sc, tmp, tag, look)
     decode, encode = tmp / "decode.cube", tmp / "encode.cube"
     if not decode.exists():
         grade.write_display(tmp)  # one look per render, so one display pair and one vignette
     if look.vignette and not (tmp / "vignette.png").exists():
         grade.write_vignette(tmp / "vignette.png", size, look)
-    spread = h * look.halation_spread / 4
-    # The glow is soft, so it is blurred at quarter size: a tight core and a wide skirt, then added as light.
-    return [
-        f"[{src}]split[{tag}p][{tag}s]",
-        f"[{tag}p]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}c]",
-        f"[{tag}s]lut1d=file='{shaper}',lut3d=file='{halo}',scale={w // 4}:{h // 4}:flags=area,split[{tag}h1][{tag}h2]",
-        f"[{tag}h1]gblur=sigma={spread * 0.004:.2f}[{tag}t]",
-        f"[{tag}h2]gblur=sigma={spread * 0.014:.2f}[{tag}k]",
-        f"[{tag}t][{tag}k]mix=inputs=2:weights=0.6 0.4,lut1d=file='{glow}',scale={w}:{h}:flags=bicubic[{tag}g]",
-        f"[{tag}c][{tag}g]blend=all_mode=addition[{tag}l]",
-    ] + ([  # the vignette multiplies display light by a 16-bit mask (ffmpeg's vignette filter is 8-bit only)
+    printed = [f"[{src}]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}l]"]
+    if look.halation:
+        shaper, halo, glow = grade.write_halation(sc, tmp, tag, look)
+        spread = h * look.halation_spread / 4
+        # The glow is soft, so it is blurred at quarter size: a tight core and a wide skirt, then added as light.
+        printed = [
+            f"[{src}]split[{tag}p][{tag}s]",
+            f"[{tag}p]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}c]",
+            f"[{tag}s]lut1d=file='{shaper}',lut3d=file='{halo}',scale={w // 4}:{h // 4}:flags=area,split[{tag}h1][{tag}h2]",
+            f"[{tag}h1]gblur=sigma={spread * 0.004:.2f}[{tag}t]",
+            f"[{tag}h2]gblur=sigma={spread * 0.014:.2f}[{tag}k]",
+            f"[{tag}t][{tag}k]mix=inputs=2:weights=0.6 0.4,lut1d=file='{glow}',scale={w}:{h}:flags=bicubic[{tag}g]",
+            f"[{tag}c][{tag}g]blend=all_mode=addition[{tag}l]",
+        ]
+    return printed + ([  # the vignette multiplies display light by a 16-bit mask (ffmpeg's vignette filter is 8-bit only)
         f"movie='{tmp / 'vignette.png'}',format=gbrp16le,loop=loop=-1:size=1[{tag}m]",
         f"[{tag}l][{tag}m]blend=all_mode=multiply:shortest=1,lut1d=file='{encode}'[{tag}]",
     ] if look.vignette else [f"[{tag}l]lut1d=file='{encode}'[{tag}]"])
@@ -132,7 +139,12 @@ def render(edit: Path, name: str | None = None) -> Path:
     total = timeline.duration().to_seconds()
     pictures = [(p, read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
-    size, rate = view.master(filmed), filmed[0]["facts"]["fps"]
+    full = settings.get("frame") == "full"
+    h = settings.get("height") or view.master(filmed)[1]
+    if full and len({round(view.full_width(sc), 3) for sc in filmed}) > 1:
+        raise SystemExit("a full-frame render needs clips of one shape")
+    size = (round(h * (view.full_width(filmed[0]) if full else view.ASPECT) / 2) * 2, h)
+    rate = filmed[0]["facts"]["fps"]
     cmd, graph, inputs = [FFMPEG, "-v", "error", "-stats", "-y"], [], 0
     with tempfile.TemporaryDirectory() as tmp:
         for i, ((clip, start, dur, _, item), sc) in enumerate(pictures):
@@ -140,15 +152,16 @@ def render(edit: Path, name: str | None = None) -> Path:
             if sc is None:
                 graph.append(title(item, size, rate, n, f"v{i}"))
                 continue
-            # Two decoder threads per input: sixteen 4K inputs at the default thread count would hold many GB of frames.
-            cmd += ["-threads", "2", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", view.source(clip, sc)]
+            # Sixteen decoder threads shared by the inputs, at least two each: sixteen 4K inputs at the default thread
+            # count would hold many GB of frames.
+            cmd += ["-threads", str(max(2, 16 // len(filmed))), "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", view.source(clip, sc)]
             eased = retime(sc, start, dur.to_seconds()) or ""
             # A retimed focus pull is a still shot, so a shot is retimed or stabilized, never both: the retime then works on
             # the camera's own frames, and the stabilizer's frame-by-frame path matches the frames it moves.
-            fix = None if eased or not steady.handheld(sc) else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), view.full_frame(sc, size), size)
+            fix = None if full or eased or not steady.handheld(sc) else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), view.full_frame(sc, size), size)
             print(f"  {clip.stem}: " + (f"stabilized, zoom {fix['zoom']:.3f}" if fix else "retimed focus pull" if eased
                                         else "steady" if steady.handheld(sc) else "on a tripod"), flush=True)
-            frame = framing(sc, size, fix, Path(tmp) / f"v{i}.cmd", f"v{i}")
+            frame = framing(sc, size, fix, Path(tmp) / f"v{i}.cmd", f"v{i}", full)
             graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{frame},tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
             graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}", look)
             inputs += 1
@@ -172,7 +185,7 @@ def render(edit: Path, name: str | None = None) -> Path:
                          f"atrim=0:{total:.3f}" + (f",afade=t=out:st={total - fade_out:.3f}:d={fade_out}" if fade_out else "") + "[a]")
             maps += ["-map", "[a]", "-c:a", "aac", "-b:a", "256k"]
         cmd += ["-filter_complex", ";".join(graph), *maps,
-                "-c:v", "libx265", "-preset", "medium", "-crf", "16", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1",
+                "-c:v", "libx265", "-preset", "medium", "-crf", str(settings.get("crf", 16)), "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1",
                 "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error",
                 "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
                 "-write_tmcd", "0", "-movflags", "+faststart", str(part)]

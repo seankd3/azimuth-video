@@ -8,7 +8,7 @@ from . import color, face, view
 
 W = 1280  # analysis width, desqueezed so faces have their real shape
 DETAIL = 3200  # width of the frames faces are recognized from
-VERSION = 8  # bump when a measurement changes meaning, so the measure pass redoes every clip
+VERSION = 9  # bump when a measurement changes meaning, so the measure pass redoes every clip
 GATES = (0.4, 0.25, 0.15, 0.08)  # chroma limits the white-balance search narrows through
 MIN_SHARE = 0.01  # least share of the moderately bright pixels a white-balance estimate may rest on
 
@@ -25,27 +25,31 @@ def frames(clip: Path, sc: dict, t: float, n: int = 1, w: int = W) -> np.ndarray
     return np.frombuffer(raw, dtype="<u2").reshape(-1, h, w, 3).astype(np.float32) / 65535
 
 
-def neutral(lin: np.ndarray) -> dict:
-    """The colour grey records as in these scene-linear frames, and the evidence for it.
+def neutral(lin: np.ndarray, band: tuple[float, float] = (40, 97), start: np.ndarray | None = None) -> dict:
+    """The colour grey records as in these scene-linear frames, among the pixels in a band of brightness
+    (percentiles), and the evidence for it.
 
-    The estimate averages moderately bright pixels that are near-neutral once the current estimate is removed (walls,
+    The estimate averages pixels in the band that are near-neutral once the current estimate is removed (walls,
     tables, shirts), narrowing through GATES. It starts from the camera's own balance, the one outside witness: under
     it grey already records as grey, so a shot full of one strong colour can't pass that colour for grey. The evidence
-    is `gate`, the tightest chroma limit the search got through, and `share`, the part of the moderately bright pixels
-    within that limit of the estimate. When nothing near the camera's balance looks grey (a close-up of one colour, or
-    a camera set for very different light; the pixels can't tell which) there is no estimate: gate None, and the
-    camera's balance stands."""
+    is `gate`, the tightest chroma limit the search got through, and `share`, the part of the band within that limit
+    of the estimate; `stops` is how bright that grey is (its median, against 18% grey). When nothing near the start
+    looks grey (a close-up of one colour, or a camera set for very different light; the pixels can't tell which)
+    there is no estimate: gate None, and the start stands."""
     rgb, yy = lin.reshape(-1, 3), color.luminance(lin).reshape(-1)
-    lo, hi = np.percentile(yy, [40, 97])
-    band = rgb[(yy > lo) & (yy < hi)]
-    found, n = {"rgb": np.ones(3), "share": 0.0, "gate": None}, np.ones(3)
+    lo, hi = np.percentile(yy, band)
+    band_rgb, band_y = rgb[(yy > lo) & (yy < hi)], yy[(yy > lo) & (yy < hi)]
+    n = np.ones(3) if start is None else np.asarray(start, dtype=float)
+    found = {"rgb": n, "share": 0.0, "gate": None, "stops": None}
     for limit in GATES:
-        c = band / n
+        c = band_rgb / n
         near = (c.max(1) - c.min(1)) / np.maximum(c.max(1), 1e-5) < limit
-        if not len(band) or near.mean() < MIN_SHARE:
+        if not len(band_rgb) or near.mean() < MIN_SHARE:
             break
-        n = band[near].mean(0)
-        found = {"rgb": n / n[1], "share": float(near.mean()), "gate": limit}
+        n = band_rgb[near].mean(0)
+        n = n / n[1]
+        found = {"rgb": n, "share": float(near.mean()), "gate": limit,
+                 "stops": float(np.log2(np.median(band_y[near]) / 0.18))}
     return found
 
 
@@ -58,6 +62,9 @@ def measure(clip: Path, sc: dict) -> dict:
     lin = color.to_linear_709(code, a)
     y = np.clip(color.luminance(lin), 1e-5, None)
     white = neutral(lin)
+    shade = neutral(lin, (10, 50), white["rgb"])  # grey in the darker half, which mixed light can tint apart
+    lit = (code.max(-1) < color.CLIP) & (y > 1e-5)
+    p1, p99 = np.percentile(np.log2(y[lit] / 0.18), [1, 99]) if lit.any() else (0.0, 0.0)
     # Sharpness: variance of the Laplacian of display luma, centre crop (where focus usually is).
     disp = color.luminance(color.tone(lin))
     c = disp[:, disp.shape[1] // 4: -disp.shape[1] // 4, disp.shape[2] // 4: -disp.shape[2] // 4]
@@ -82,6 +89,11 @@ def measure(clip: Path, sc: dict) -> dict:
         "neutral_rgb": [round(float(v), 3) for v in white["rgb"]],
         "neutral_share": round(white["share"], 3),
         "neutral_gate": white["gate"],
+        "neutral_stops": None if white["stops"] is None else round(white["stops"], 2),
+        "shadow_rgb": [round(float(v), 3) for v in shade["rgb"]],
+        "shadow_gate": shade["gate"],
+        "shadow_stops": None if shade["stops"] is None else round(shade["stops"], 2),
+        "range_stops": [round(float(p1), 2), round(float(p99), 2)],  # 1st and 99th percentile of unclipped light
         "sharpness": round(float(lap.var(axis=(1, 2)).mean() * 1e4), 2),
         "motion": round(float(np.abs(second - disp).mean() * 100), 2),
         "face": seen,

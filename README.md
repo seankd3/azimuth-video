@@ -37,10 +37,15 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
      `kodak-gold-200`, `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
      `python -m footage.grade` lists them;
+   - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
+     lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a night shot is lifted only partly.
+     The highlights are kept under the shoulder (the look's `key`, `lift`, `headroom` and `shadows` settings);
    - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
      most a 6% zoom, so the deliberate move stays and the picture keeps its 16-bit precision.
 
    The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
+   A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
+   documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
 
 Kdenlive and DaVinci Resolve open the same timeline files. A timeline can also hold title cards (an OTIO
 GeneratorReference of kind `title`) and music, and `python -m footage.music TRACK` finds a track's beats and
