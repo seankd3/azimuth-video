@@ -3,8 +3,9 @@
   "lut": "natural.cube",
   "exposure": 0.0,
   "key": 0.75,
-  "dark": -0.7,
+  "dark": -1.4,
   "headroom": 2.0,
   "shadows": 1.0,
-  "tint": 0.03
+  "tint": 0.03,
+  "night": 0.9
 }

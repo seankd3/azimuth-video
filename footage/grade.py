@@ -24,6 +24,7 @@ SIZE = 33
 FACE_SHOT = 0.2  # a face at least this share of the frame height, in at least half the samples, makes a face shot
 FACE_LIFT = 1.0  # most a face shot's exposure moves to put its person at their skin level
 WHITE = float(np.log2(0.9 / 0.18))  # diffuse white, a white wall or page, in stops above 18% grey
+NIGHT = (0.005, 0.09)  # scene light where a night shot's colour is faded most, and where it is full again
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class Look:
     key: float = 0.0  # how much of the scene's own key is kept: 1 keeps a bright room brighter than a dim one
     dark: float | None = None  # a dark shot (one the target would brighten) is shown as exposed, moved this many stops
     #                           (the camera was exposed for its lit part); None brightens it to the target
+    night: float = 0.0  # share of colour a dark shot loses in its deepest shadows, as the eye does at night
     headroom: float | None = None  # most stops the 99th percentile may land above diffuse white; None: no limit
     shadows: float = 0.0  # share of the shadows' own grey balance applied: 1 makes grey grey at every level
 
@@ -61,6 +63,21 @@ def looks() -> list[Look]:
     return [look(p.stem) for p in sorted(LOOKS.glob("*.json"))]
 
 
+def target(sc: dict, look: Look) -> float:
+    """Stops that bring the frame's average to the look's exposure, keeping look.key of the scene's own key."""
+    measured = sc["measured"]
+    avg, (low, high) = measured["exposure_stops"], measured["range_stops"]
+    # The scene's key: where its average sits in its own range of light, -1 (low-key) to 1 (high-key), as in
+    # Reinhard's automatic key (2002): a key of k keeps 2k stops of the scene's brightness.
+    k = 2 * (avg - low) / (high - low) - 1 if high > low else 0.0
+    return look.exposure + look.key * 2 * k - avg
+
+
+def dark(sc: dict, look: Look) -> bool:
+    """Whether the look shows this shot as a dark one: as exposed, for its lit part, rather than brightened."""
+    return look.dark is not None and target(sc, look) > 0
+
+
 def exposure(sc: dict, look: Look) -> tuple[float, float]:
     """Stops to apply: to bring the frame's average to the look's exposure, and the extra for a face shot.
 
@@ -69,15 +86,9 @@ def exposure(sc: dict, look: Look) -> tuple[float, float]:
     machine cannot tell darker skin from underexposure, so it never brightens a face it has no level for.
     """
     measured = sc["measured"]
-    avg, (low, high) = measured["exposure_stops"], measured["range_stops"]
-    # The scene's key: where its average sits in its own range of light, -1 (low-key) to 1 (high-key), as in
-    # Reinhard's automatic key (2002): a key of k keeps 2k stops of the scene's brightness.
-    k = 2 * (avg - low) / (high - low) - 1 if high > low else 0.0
-    stops = look.exposure + look.key * 2 * k - avg
-    if stops > 0 and look.dark is not None:  # ETTR comes down fully; a dark shot keeps what it was exposed for
-        stops = look.dark
+    stops = look.dark if dark(sc, look) else target(sc, look)  # ETTR comes down fully; a dark shot keeps its exposure
     if look.headroom is not None:  # and never so far that the brightest unclipped light goes past the shoulder
-        stops = min(stops, WHITE + look.headroom - high)
+        stops = min(stops, WHITE + look.headroom - measured["range_stops"][1])
     face, skin = measured.get("face"), (sc.get("person") or {}).get("skin_stops")
     if skin is None or not (face and face["height"] >= FACE_SHOT and face["in_frames"] * 2 >= face["of"]):
         return stops, 0.0
@@ -159,6 +170,10 @@ def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> Path:
     b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")  # .cube order: red changes fastest
     lin = color.to_linear_709(np.stack([r, g, b], axis=-1).reshape(-1, 3), sc["assumed"])
     lin = lin * shading(sc, look, lin) * balance(sc, look)
+    if look.night and dark(sc, look):  # colour fades out of the shadows of a night: a lot under green lights reads dark
+        y = color.luminance(lin)[:, None]
+        t = np.clip((y - NIGHT[0]) / (NIGHT[1] - NIGHT[0]), 0, 1)
+        lin = y + (lin - y) * (1 - look.night * (1 - t * t * (3 - 2 * t)))
     pivot = color.to_acescct(np.full(3, 0.18))[0]
     picture = sample(read_cube(look.lut), pivot + (color.to_acescct(lin) - pivot) * look.contrast)
     picture = np.stack([np.interp(picture[:, c], *grey_axis(look.lut)[c]) for c in range(3)], axis=-1)
