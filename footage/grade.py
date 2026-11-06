@@ -230,12 +230,15 @@ def write_display(folder: Path) -> tuple[Path, Path]:
     return write_1d(folder / "decode.cube", x ** 2.4), write_1d(folder / "encode.cube", x ** (1 / 2.4))
 
 
-def write_vignette(path: Path, size: tuple[int, int], look: Look) -> Path:
-    """A 16-bit mask of lens falloff: cos^4 of the distance from the centre, the corners look.vignette stops darker."""
+def write_vignette(path: Path, size: tuple[int, int], look: Look, squeeze: float = 1.0) -> Path:
+    """A 16-bit mask of lens falloff: cos^4 of the distance from the centre, the corners look.vignette stops darker.
+
+    A lens darkens in a circle on the sensor, so through an anamorphic lens the falloff desqueezes to an oval as wide
+    as the squeeze: the top and bottom edges darken too, not only the sides of a wide frame."""
     import cv2
     w, h = size
     y, x = np.ogrid[:h, :w]
-    d = np.hypot(x - w / 2, y - h / 2) / np.hypot(w / 2, h / 2)
+    d = np.hypot((x - w / 2) / squeeze, y - h / 2) / np.hypot(w / 2 / squeeze, h / 2)
     cv2.imwrite(str(path), np.round(np.cos(np.arccos(2 ** (-look.vignette / 4)) * d) ** 4 * 65535).astype(np.uint16))
     return path
 

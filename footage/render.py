@@ -108,7 +108,7 @@ def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look
     if not decode.exists():
         grade.write_display(tmp)  # one look per render, so one display pair and one vignette
     if look.vignette and not (tmp / "vignette.png").exists():
-        grade.write_vignette(tmp / "vignette.png", size, look)
+        grade.write_vignette(tmp / "vignette.png", size, look, view.squeeze(sc))
     printed = [f"[{src}]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}l]"]
     if look.halation:
         shaper, halo, glow = grade.write_halation(sc, tmp, tag, look)
