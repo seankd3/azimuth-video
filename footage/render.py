@@ -198,6 +198,8 @@ def render(edit: Path, name: str | None = None) -> Path:
 def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     """One graded frame at the master's full size, as a maximum-quality JPEG."""
     sc = read(clip)
+    if not 0 <= t < sc["facts"]["duration"]:  # past the end ffmpeg writes nothing, or waits forever on the vignette
+        raise SystemExit(f"{clip.name} is {sc['facts']['duration']:.1f} s long: no frame at {t:g} s")
     with tempfile.TemporaryDirectory() as tmp:
         size = view.master([sc])
         graph = [f"[0:v]{framing(sc, size, None, Path(tmp), 'x')}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
