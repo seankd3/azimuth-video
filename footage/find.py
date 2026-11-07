@@ -5,15 +5,25 @@ person's name and the names of the voices heard. Each line shows where the usabl
 focus pulls, so a shot can be cut straight from the list. Sections that are out of date are left out of the search,
 and the count of clips that had any is printed after the results.
 
+With --shows, --sounds or --like the answer is moments rather than clips: the windows of the clips found whose picture
+or sound is nearest a phrase, or whose picture is nearest a moment of another clip (embed.py), nearest first, each with
+its seconds and how near it is.
+
 python -m footage.find hands wire --size close-up --steady
 python -m footage.find --person p01 --json
+python -m footage.find --shows "a forklift backing up" --steady
+python -m footage.find --sounds "a grinder" --day 2026-11-03
+python -m footage.find --like 2026-10-29/CLIP0001@12
 """
 import argparse
 import json
 import sys
 from pathlib import Path
 
-from . import library, passes, people, sidecar
+import numpy as np
+
+from . import embed, library, passes, people, sidecar
+from .frame import seconds
 from .steady import SHAKE_MIN, handheld
 from .transcribe.formats import turns
 
@@ -74,6 +84,22 @@ def line(r: dict) -> str:
     return f"{r['name']:22} {r['seconds']:5.1f}s {r['size'] or '?':8} {who:6} {'; '.join(where):34} {r['summary']}"
 
 
+def query(a) -> tuple[str, np.ndarray, Path | None] | None:
+    """What the moments are ranked by: the kind of window, the vector to be near, and the clip it came from."""
+    if a.shows or a.sounds:
+        return ("picture" if a.shows else "sound"), embed.phrase(a.shows or a.sounds), None
+    if a.like:
+        name, at = a.like.rsplit("@", 1)
+        clip = next((c for c in library.clips(a.library) if f"{c.parent.name}/{c.stem}" == name), None)
+        if clip is None or (sc := sidecar.read(clip)) is None:
+            raise SystemExit(f"--like: no filed clip {name} in {a.library}")
+        rows = passes.fresh(clip, sc)[0].get("embedding", {}).get("picture")
+        if not rows:
+            raise SystemExit(f"--like: {name} has no current embedding: run python -m footage")
+        return "picture", np.array(rows[min(int(seconds(at) // embed.WINDOW), len(rows) - 1)]), clip
+    return None
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="footage.find")
     ap.add_argument("words", nargs="*")
@@ -84,7 +110,13 @@ if __name__ == "__main__":
     ap.add_argument("--pulls", action="store_true", help="only clips with a focus pull")
     ap.add_argument("--day", help="shooting day, YYYY-MM-DD")
     ap.add_argument("--json", action="store_true", help="full records, for an agent")
+    near = ap.add_mutually_exclusive_group()
+    near.add_argument("--shows", metavar="PHRASE", help="moments whose picture matches the phrase")
+    near.add_argument("--sounds", metavar="PHRASE", help="moments whose sound matches the phrase")
+    near.add_argument("--like", metavar="DAY/CLIP@SECONDS", help="moments that look like that moment of another clip")
+    ap.add_argument("--top", type=int, default=20, help="how many moments (with --shows, --sounds or --like)")
     a = ap.parse_args()
+    q = query(a)
     found, behind = [], 0
     wanted = people.called(a.person, a.library) if a.person else set()
     for c in library.clips(a.library):
@@ -93,8 +125,14 @@ if __name__ == "__main__":
         sc, stale = passes.fresh(c, sc)
         behind += bool(stale)
         sc["person"], sc["voices"] = people.of(c, sc), people.voiced(c, sc)
-        if matches(sc, a, wanted):
-            found.append(record(c, sc))
-    print(json.dumps(found, indent=1) if a.json else "\n".join(map(line, found)) + f"\n{len(found)} clips")
+        if matches(sc, a, wanted) and not (q and c == q[2]):
+            found.append((record(c, sc), sc))
+    if q:
+        out = embed.nearest(found, q[0], q[1], a.top)
+        print(json.dumps(out, indent=1) if a.json else "\n".join(
+            f"{m['start']:6.1f}-{m['end']:<6.1f} {m['near']:.2f}  {line(m)}" for m in out) + f"\n{len(out)} moments")
+    else:
+        found = [r for r, _ in found]
+        print(json.dumps(found, indent=1) if a.json else "\n".join(map(line, found)) + f"\n{len(found)} clips")
     if behind:
         print(f"{behind} clips have out-of-date sections, searched without them: run python -m footage", file=sys.stderr)

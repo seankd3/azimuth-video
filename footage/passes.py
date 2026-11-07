@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import describe, focus, measure, probe, steady, transcribe
+from . import describe, embed, focus, measure, probe, steady, transcribe
 
 
 @dataclass
@@ -29,6 +29,8 @@ PASSES = [
     # These two read every frame on the GPU decoder.
     Pass("focus", focus.focus, focus.identity, 2),
     Pass("shake", steady.shake, steady.identity, 2),
+    # One clip at a time: the model holds the GPU, and each clip's frames are cut 8 at once.
+    Pass("embedding", embed.embed, embed.identity, 1),
 ]
 OWNER = {p.section: p for p in PASSES}
 

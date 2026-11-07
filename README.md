@@ -29,23 +29,27 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    name them in a transcript. You can add names to `people.json`.
 8. **Measure shake.** It follows the camera's motion on every frame and records, second by second, how much the
    camera shakes beyond its smoothed path. Moving hands and people in front of a locked-off camera don't count.
-9. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
-   - each shot gets its own exposure and white-balance correction;
-   - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
-     its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
-     walls), and lens vignette;
-   - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
-     `kodak-gold-200`, `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
-     `python -m footage.grade` lists them;
-   - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
-     lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a dark shot is shown as exposed (for its lit part, a doorway at night), darker, with colour fading out of its shadows as it does for the eye at night.
-     The highlights are kept under the shoulder (the look's `key`, `dark`, `night`, `headroom`, `shadows` and `tint` settings);
-   - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
-     most a 6% zoom, so the deliberate move stays and the picture keeps its 16-bit precision.
+9. **Index.** EmbeddingGemma 2 turns every 5 seconds of a clip into two vectors, one for the picture and one for the
+   sound, in the same space as text. Search can then rank moments by a phrase ("a forklift backing up"), by a sound
+   ("a grinder"), or by how much they look like a moment of another clip. The model runs on your machine, with the
+   Hugging Face hub switched off.
+10. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
+    - each shot gets its own exposure and white-balance correction;
+    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
+      its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
+      walls), and lens vignette;
+    - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
+      `kodak-gold-200`, `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
+      `python -m footage.grade` lists them;
+    - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
+      lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a dark shot is shown as exposed (for its lit part, a doorway at night), darker, with colour fading out of its shadows as it does for the eye at night.
+      The highlights are kept under the shoulder (the look's `key`, `dark`, `night`, `headroom`, `shadows` and `tint` settings);
+    - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
+      most a 6% zoom, so the deliberate move stays and the picture keeps its 16-bit precision.
 
-   The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
-   A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
-   documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
+    The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
+    A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
+    documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
 
 Kdenlive and DaVinci Resolve open the same timeline files. A timeline can also hold title cards (an OTIO
 GeneratorReference of kind `title`) and music, and `python -m footage.music TRACK` finds a track's beats and
@@ -56,6 +60,8 @@ loudness so cuts can land on the beat.
 ```bash
 python -m footage                     # file the inbox, then fill every sidecar section that is missing or out of date
 python -m footage.find hands --size close-up --steady   # find shots; each line shows its steady stretches and focus pulls
+python -m footage.find --shows "a forklift backing up" --top 10   # moments whose picture matches; --sounds for sound
+python -m footage.find --like 2026-10-29/CLIP0001@12   # moments that look like second 12 of that clip
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
 python -m footage.frame CLIP 02:05 [--out PATH.jpg]   # one desqueezed, ungraded frame of a clip (card, Ingest or Library), for a transcript's timestamp
@@ -78,12 +84,13 @@ take only what the desktop leaves.
 
 This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Spark GPU.
 
-- Python 3.12 with numpy, scipy, colour-science, opentimelineio, opencv-python-headless, onnx-asr and sherpa-onnx.
+- Python 3.12 with numpy, scipy, colour-science, opentimelineio, opencv-python-headless, onnx-asr, sherpa-onnx and
+  pillow, plus torch and torchvision built for CUDA, transformers and sentence-transformers.
 - `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC, zscale and 10/12-bit x265 (for example, a BtbN build).
 - LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`), for RAW clips.
 - LM Studio, serving `qwen/qwen3.5-35b-a3b`, for the descriptions.
 - Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), NeMo TitaNet
-  (sherpa-onnx), and Parakeet TDT 0.6B v2. Keep the folder read-only (`chmod -R a-w`): a section is identified
+  (sherpa-onnx), Parakeet TDT 0.6B v2, and EmbeddingGemma 2 (`google/embeddinggemma-2`, as `embeddinggemma-2`). Keep the folder read-only (`chmod -R a-w`): a section is identified
   by its models' file names and sizes, so a new model or version goes in under a new name, never over an old file.
 - Optional: [Gyroflow](https://github.com/gyroflow/gyroflow) for shots that shake too much for the built-in
   stabilizer. Since 1.7 it can measure motion from the picture alone (`--optical-correction 100`), and it corrects
