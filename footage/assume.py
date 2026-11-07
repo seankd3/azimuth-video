@@ -1,6 +1,7 @@
 """Set what a clip's file doesn't record about it, in its sidecar's `assumed` section: lens squeeze, log curve and
-gamut, and neutral_rgb (the colour grey records as; [1, 1, 1] keeps the
-camera's balance, null goes back to the measured one). Anything read from a changed value is redone by the next run.
+gamut, neutral_rgb (the colour grey records as; [1, 1, 1] keeps the
+camera's balance, null goes back to the measured one), and exposure (stops added to the shot's automatic exposure,
+where a person judged it too bright or too dark; null goes back to automatic). Anything read from a changed value is redone by the next run.
 
 python -m footage.assume 2026-10-29 squeeze=1.6                 every clip of a shooting day
 python -m footage.assume CLIP0101 2026-10-28/CLIP0042.MP4 neutral_rgb=[1,1,1]
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from . import library, sidecar
 
-KEYS = ("squeeze", "log", "gamut", "neutral_rgb")
+KEYS = ("squeeze", "log", "gamut", "neutral_rgb", "exposure")
 
 
 def value(text: str):

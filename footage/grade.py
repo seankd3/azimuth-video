@@ -80,7 +80,8 @@ def dark(sc: dict, look: Look) -> bool:
 
 
 def exposure(sc: dict, look: Look) -> tuple[float, float]:
-    """Stops to apply: to bring the frame's average to the look's exposure, and the extra for a face shot.
+    """Stops to apply: to bring the frame's average to the look's exposure, plus any correction a person set for the
+    shot (footage.assume CLIP exposure=-0.3), and the extra for a face shot.
 
     In a face shot of someone with a skin level in people.json, exposure moves so their lit cheek sits at that level,
     so each person looks the same in every shot, against a bright window or not. Nobody else's face is moved: the
@@ -90,6 +91,7 @@ def exposure(sc: dict, look: Look) -> tuple[float, float]:
     stops = look.dark if dark(sc, look) else target(sc, look)  # ETTR comes down fully; a dark shot keeps its exposure
     if look.headroom is not None:  # and never so far that the brightest unclipped light goes past the shoulder
         stops = min(stops, WHITE + look.headroom - measured["range_stops"][1])
+    stops += sc["assumed"].get("exposure") or 0.0
     face, skin = measured.get("face"), (sc.get("person") or {}).get("skin_stops")
     if skin is None or not (face and face["height"] >= FACE_SHOT and face["in_frames"] * 2 >= face["of"]):
         return stops, 0.0

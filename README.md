@@ -123,6 +123,8 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
   mid-tones within it). A gate of null means nothing near the camera's balance looked grey (a close-up of one colour,
   or a camera set for very different light), so the camera's balance stands. To override a clip: `python -m footage.assume CLIP neutral_rgb=[1,1,1]`
   keeps the camera's balance; any other value is the colour grey records as, and `null` goes back to the measured one.
+- A shot that looks too bright or too dark: `python -m footage.assume CLIP exposure=-0.3` moves it by that many stops
+  on top of the automatic exposure, in every render and still. `null` goes back to automatic.
 - People's names and skin levels live in `people.json` in your library. They never go in this repository. An edit
   there holds at once: search and render look a clip's person up when they read it.
 - A voice gets a name when you give it one: `python -m footage.transcribe NAME.transcript.json --names "Ana,Ben"`
