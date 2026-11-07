@@ -31,29 +31,25 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 6. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
 7. **Recognize people.** It groups faces into people across the whole library, and knows people's voices once you
    name them in a transcript. You can add names to `people.json`.
-8. **Measure shake.** It follows the camera's motion on every frame and records, second by second, how much the
-   camera shakes beyond its smoothed path. Moving hands and people in front of a locked-off camera don't count.
-9. **Index.** EmbeddingGemma 2 turns every 5 seconds of a clip into two vectors, one for the picture and one for the
+8. **Index.** EmbeddingGemma 2 turns every 5 seconds of a clip into two vectors, one for the picture and one for the
    sound, in the same space as text. Search can then rank moments by a phrase ("a forklift backing up"), by a sound
    ("a grinder"), or by how much they look like a moment of another clip. The model runs on your machine, with the
    Hugging Face hub switched off.
-10. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
-    - each shot gets its own exposure and white-balance correction;
-    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
-      its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
-      walls), and lens vignette;
-    - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
-      `kodak-gold-200`, `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
-      `python -m footage.grade` lists them;
-    - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
-      lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a dark shot is shown as exposed (for its lit part, a doorway at night), darker, with colour fading out of its shadows as it does for the eye at night.
-      The highlights are kept under the shoulder (the look's `key`, `dark`, `night`, `headroom`, `shadows` and `tint` settings);
-    - a handheld shot is stabilized: the 2.39:1 window follows the shake inside the wider desqueezed frame, with at
-      most a 6% zoom, so the deliberate move stays and the picture keeps its 16-bit precision.
+9. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
+   - each shot gets its own exposure and white-balance correction;
+   - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
+     its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
+     walls), and lens vignette;
+   - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
+     `kodak-gold-200`, `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
+     `python -m footage.grade` lists them;
+   - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
+     lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a dark shot is shown as exposed (for its lit part, a doorway at night), darker, with colour fading out of its shadows as it does for the eye at night.
+     The highlights are kept under the shoulder (the look's `key`, `dark`, `night`, `headroom`, `shadows` and `tint` settings).
 
-    The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
-    A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
-    documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
+   The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
+   A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
+   documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
 
 Edits are made in code: an agent writes the timeline, and the toolkit grades and renders it. A timeline can also hold title cards (an OTIO
 GeneratorReference of kind `title`) and music, and `python -m footage.music TRACK` finds a track's beats and
@@ -63,13 +59,13 @@ loudness so cuts can land on the beat.
 
 ```bash
 python -m footage                     # file the inbox, then fill every sidecar section that is missing or out of date
-python -m footage.find hands --size close-up --steady   # find shots; each line shows its steady stretches and focus pulls
+python -m footage.find hands --size close-up   # find shots; each line shows its focus pulls and speech
 python -m footage.find --shows "a forklift backing up" --top 10   # moments whose picture matches; --sounds for sound
 python -m footage.find --like 2026-10-29/CLIP0001@12   # moments that look like second 12 of that clip
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
 python -m footage.frame CLIP 02:05 [--out PATH.jpg]   # one desqueezed, ungraded frame of a clip (card, Ingest or Library), for a transcript's timestamp
-python -m footage.assume 2026-10-29 support=tripod   # set what the file doesn't record, for clips or whole days
+python -m footage.assume 2026-10-29 squeeze=1.6   # set what the file doesn't record, for clips or whole days
 python -m footage.graded              # every clip graded on its own, in the house look; skips masters still current
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links
 ```
@@ -125,8 +121,6 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
   mid-tones within it). A gate of null means nothing near the camera's balance looked grey (a close-up of one colour,
   or a camera set for very different light), so the camera's balance stands. To override a clip: `python -m footage.assume CLIP neutral_rgb=[1,1,1]`
   keeps the camera's balance; any other value is the colour grey records as, and `null` goes back to the measured one.
-- A clip shot on a tripod: `python -m footage.assume CLIP support=tripod`. It is then never stabilized, and search
-  lists it as steady throughout. The picture alone can't always tell a still camera from a subject that fills the frame.
 - People's names and skin levels live in `people.json` in your library. They never go in this repository. An edit
   there holds at once: search and render look a clip's person up when they read it.
 - A voice gets a name when you give it one: `python -m footage.transcribe NAME.transcript.json --names "Ana,Ben"`

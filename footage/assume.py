@@ -1,8 +1,8 @@
 """Set what a clip's file doesn't record about it, in its sidecar's `assumed` section: lens squeeze, log curve and
-gamut, support ("tripod" means never stabilized), and neutral_rgb (the colour grey records as; [1, 1, 1] keeps the
+gamut, and neutral_rgb (the colour grey records as; [1, 1, 1] keeps the
 camera's balance, null goes back to the measured one). Anything read from a changed value is redone by the next run.
 
-python -m footage.assume 2026-10-29 support=tripod              every clip of a shooting day
+python -m footage.assume 2026-10-29 squeeze=1.6                 every clip of a shooting day
 python -m footage.assume CLIP0101 2026-10-28/CLIP0042.MP4 neutral_rgb=[1,1,1]
 """
 import argparse
@@ -11,14 +11,14 @@ from pathlib import Path
 
 from . import library, sidecar
 
-KEYS = ("squeeze", "log", "gamut", "support", "neutral_rgb")
+KEYS = ("squeeze", "log", "gamut", "neutral_rgb")
 
 
 def value(text: str):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        return text  # a bare word, like tripod
+        return text  # a bare word, like a log curve name
 
 
 def targets(lib: Path, names: list[str]) -> list[Path]:

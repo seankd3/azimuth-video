@@ -4,18 +4,16 @@ The timeline is the whole edit: video track 1 is picture, every audio track is m
 black and out to black over `metadata["footage"]["fades"]` seconds ([in, out], default [0.8, 1.0]; 0 is a cut). The
 whole edit is printed in one look (grade.py): the timeline's `metadata["footage"]["look"]`, or `--look`, or the default; the master
 is written beside the timeline as "EDIT - LOOK.mp4", so one edit can be rendered in several looks. An audio clip may set
-`metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21). Kdenlive and Resolve open the same file.
+`metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21).
 The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
-A timeline may set `metadata["footage"]["frame"]` to "full" for the whole recorded frame, desqueezed (never
-stabilized: there is no margin to move in), `["height"]` for a smaller master, and `["crf"]` (default 16) for a
+A timeline may set `metadata["footage"]["frame"]` to "full" for the whole recorded frame, desqueezed,
+`["height"]` for a smaller master, and `["crf"]` (default 16) for a
 smaller file: a documentation copy is {"look": "natural", "frame": "full", "height": 1080, "crf": 28, "fades": [0, 0]}.
 A clip whose media reference is a GeneratorReference of kind "title" is a title card: its `text` on black, fading in
 and out, with optional `size` (share of the frame height), `font` (a fontconfig name) and `fade` (seconds).
 Stills go through exactly the same picture graph, so an approved still is what the video will show.
 A focus pull in a still shot is retimed so the focus eases in and out evenly over the same duration (smooth.py);
-blended frames look like in-between focus. Cut points don't move. A handheld shot is stabilized (steady.py): its
-window follows the shake inside the wider desqueezed frame, so the shake is gone and the deliberate move stays.
-A still shows a stabilized shot as framed without stabilization, up to steady.MOST_ZOOM wider.
+blended frames look like in-between focus. Cut points don't move. Shots are shown as shot: nothing is stabilized.
 
 python -m footage.render EDIT.otio [--look NAME,NAME...]
 python -m footage.render --stills OUT_DIR [--look NAME,NAME...] CLIP@SECONDS ...
@@ -29,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import opentimelineio as otio
 
-from . import grade, idle, library, passes, people, sidecar, smooth, steady, view
+from . import grade, idle, library, passes, people, sidecar, smooth, view
 
 FADE_IN, FADE_OUT = 0.8, 1.0
 READS = ("measured", "focus")  # the grade reads measured; a focus pull's retime reads focus
@@ -73,24 +71,12 @@ def title(clip: otio.schema.Clip, size: tuple[int, int], rate: str, frames: int,
             f"x=(w-text_w)/2:y=(h-text_h)/2:alpha='{alpha}',trim=end_frame={frames},format=gbrp16le[{tag}]")
 
 
-def framing(sc: dict, size: tuple[int, int], fix: dict | None, cmds: Path, tag: str, full: bool = False) -> str:
-    """Filters from camera frames to the desqueezed picture at size, as 16-bit RGB: the 2.39:1 window (or the whole
-    frame), still, or stabilized by `fix`."""
+def framing(sc: dict, size: tuple[int, int], full: bool = False) -> str:
+    """Filters from camera frames to the desqueezed picture at size, as 16-bit RGB: the 2.39:1 window, or the whole
+    frame."""
     w, h = size
-    if fix is None:
-        cw, ch = (sc["facts"]["width"], sc["facts"]["height"]) if full else view.window(sc)
-        return f"crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le"
-    z, shift, turn = fix["zoom"], fix["fix"], fix["roll"]
-    fw, fh = (int(np.ceil(v * z / 2)) * 2 for v in view.full_frame(sc, size))
-    # The window follows the shake (centre minus the correction), so the picture holds where the smoothed path puts it.
-    # The plan's zoom keeps the window inside the frame on every frame, so nothing here is clamped.
-    x = np.round((fw - w) / 2 - shift[:, 0] * z).astype(int)
-    y = np.round((fh - h) / 2 - shift[:, 1] * z).astype(int)
-    rate = float(Fraction(sc["facts"]["fps"]))
-    cmds.write_text("".join(f"{(n - 0.5) / rate:.4f} crop@{tag} x {x[n]}, crop@{tag} y {y[n]}"
-                            + (f", rotate@{tag} a {shift[n, 2]:.6f}" if turn else "") + ";\n" for n in range(1, len(x))))
-    rotate = f"rotate@{tag}=a={shift[0, 2]:.6f}:ow={fw}:oh={fh}:bilinear=1," if turn else ""
-    return f"scale={fw}:{fh}:flags=lanczos,setsar=1,format=gbrp16le,sendcmd=f='{cmds}',{rotate}crop@{tag}={w}:{h}:{x[0]}:{y[0]}"
+    cw, ch = (sc["facts"]["width"], sc["facts"]["height"]) if full else view.window(sc)
+    return f"crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le"
 
 
 def retime(sc: dict, start: float, dur: float) -> str | None:
@@ -156,12 +142,9 @@ def render(edit: Path, name: str | None = None) -> Path:
             # count would hold many GB of frames.
             cmd += ["-threads", str(max(2, 16 // len(filmed))), "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", view.source(clip, sc)]
             eased = retime(sc, start, dur.to_seconds()) or ""
-            # A retimed focus pull is a still shot, so a shot is retimed or stabilized, never both: the retime then works on
-            # the camera's own frames, and the stabilizer's frame-by-frame path matches the frames it moves.
-            fix = None if full or eased or not steady.handheld(sc) else steady.plan(steady.motion(clip, sc, start, n), float(Fraction(rate)), view.full_frame(sc, size), size)
-            print(f"  {clip.stem}: " + (f"stabilized, zoom {fix['zoom']:.3f}" if fix else "retimed focus pull" if eased
-                                        else "steady" if steady.handheld(sc) else "on a tripod"), flush=True)
-            frame = framing(sc, size, fix, Path(tmp) / f"v{i}.cmd", f"v{i}", full)
+            if eased:
+                print(f"  {clip.stem}: retimed focus pull", flush=True)
+            frame = framing(sc, size, full)
             graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{frame},tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
             graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}", look)
             inputs += 1
@@ -202,7 +185,7 @@ def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
         raise SystemExit(f"{clip.name} is {sc['facts']['duration']:.1f} s long: no frame at {t:g} s")
     with tempfile.TemporaryDirectory() as tmp:
         size = view.master([sc])
-        graph = [f"[0:v]{framing(sc, size, None, Path(tmp), 'x')}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
+        graph = [f"[0:v]{framing(sc, size)}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
         subprocess.run([FFMPEG, "-v", "error", "-y", "-threads", "4", "-ss", f"{t:.3f}", "-i", view.source(clip, sc),
                         "-filter_complex", ";".join(graph), "-map", "[o]", "-frames:v", "1",
                         "-pix_fmt", "yuvj444p", "-q:v", "1", str(out)], check=True)

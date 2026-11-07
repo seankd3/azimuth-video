@@ -9,6 +9,9 @@ voices, and a person you named, gave a skin level or whose voice is known stays 
 measured, so what you wrote is never lost. A clip's subject is looked up here when a reader asks (people.of), so an
 edited name or skin level holds at once.
 
+Every other voice with at least HEARD seconds of speech is grouped across the Library with the voices it sounds
+like, under one id, so a voice has one label in every clip: its name once you give it one, its id until then.
+
 A voice is known once it has a name: naming a voice in a transcript (python -m footage.transcribe NAME.json --names)
 records its print, with the file and time it came from, under that person. A new transcript, and each clip's
 transcript at every build, gives a voice the name of the known person it matches (VOICE), and that print is recorded
@@ -28,8 +31,9 @@ from . import face, library, sidecar
 from .passes import fresh
 
 ACROSS = 0.95  # stricter than face.SAME across clips, comparing every member: splitting one person is harmless, merging two is not
-VOICE = 0.72  # TitaNet cosine at which a voice is a known person's: on four recordings one person scored 0.79 to 0.90
-#              across files, and two different people at most 0.63
+VOICE = 0.7  # TitaNet-large cosine at which two files' voices are one person: across 18 named voices in 9 recordings
+#             one person scored 0.72 to 0.90, and two different people at most 0.54
+HEARD = 4.0  # seconds of speech a voice needs before it is grouped with voices in other files
 
 
 def unit(v) -> np.ndarray:
@@ -121,10 +125,46 @@ def build(lib: Path, report: list) -> None:
                 continue
             entries = heard(entries, at, {n: [{**v, "by": "build"}]
                                           for v, n in zip(said, names([v["print"] for v in said], entries, at)) if n})
-        return sorted(entries, key=lambda e: e["id"])
+        known_voices = {(v["at"], v["voice"]) for e in entries for v in e.get("voices", [])}
+        unheard = [{"at": library.name_of(clip), **v, "by": "build"} for clip, sc in clips.items()
+                   for v in sc.get("transcript", {}).get("voices", [])
+                   if v["seconds"] >= HEARD and (library.name_of(clip), v["voice"]) not in known_voices]
+        return sorted(strangers(entries, unheard), key=lambda e: e["id"])
 
     entries = update(lib, change)
     report.append(("people", f"{len(entries)} people", f"{sum(len(e['clips']) > 1 for e in entries)} in more than one clip"))
+
+
+def strangers(entries: list, unheard: list) -> list:
+    """The entries with the voices nobody named grouped into people across files: complete linkage, so every two
+    voices of one person are at least VOICE alike. A group keeps the id of the last build's group it sounds like; an
+    unnamed voice-only entry whose voice is no longer heard is dropped, since nothing in it was decided by anyone."""
+    stranger = lambda e: not e.get("name") and not e.get("print") and e.get("skin_stops") is None
+    before = [(e["id"], centre(e["voices"])) for e in entries if stranger(e) and e.get("voices")]
+    entries = [e for e in entries if not stranger(e)]
+    groups: list = []
+    if len(unheard) > 1:
+        from scipy.cluster.hierarchy import fcluster, linkage
+        cut = fcluster(linkage(np.array([unit(v["print"]) for v in unheard]), method="complete", metric="cosine"),
+                       t=1 - VOICE, criterion="distance")
+        groups = [[unheard[i] for i in np.nonzero(cut == g)[0]] for g in sorted(set(cut))]
+    elif unheard:
+        groups = [unheard]
+    used: set = set()
+    for g in sorted(groups, key=lambda g: -sum(v["seconds"] for v in g)):
+        c = centre(g)
+        old = max(((float(c @ p), i) for i, p in before if i not in used), default=(0.0, None))
+        taken = {e["id"] for e in entries} | used
+        pid = old[1] if old[0] >= VOICE else next(f"p{i:02d}" for i in range(1, 9999) if f"p{i:02d}" not in taken)
+        used.add(pid)
+        entries.append({"id": pid, "name": None, "skin_stops": None, "clips": [], "print": None,
+                        "voices": [{**v, "print": [round(float(x), 4) for x in v["print"]]} for v in g]})
+    return entries
+
+
+def centre(prints: list) -> np.ndarray:
+    """One voice from several of its prints, each weighted by the seconds it was heard."""
+    return unit(np.sum([unit(v["print"]) * v["seconds"] for v in prints], axis=0))
 
 
 def voices(entries: list, besides: str | None = None) -> dict:
@@ -173,10 +213,11 @@ def at(media: Path, lib: Path) -> str:
 
 
 def voiced(clip: Path, sc: dict) -> dict:
-    """Who the clip's voices are, by voice id: the person a print from this clip was recorded under, when it is the
-    print of a voice in the clip's transcript as it is now, so a transcript redone since names nobody until the next
-    build, and a voice named in a transcript of the clip is named here too."""
-    recorded = [(v["print"], e["name"]) for e in known(clip.parent.parent / "people.json") for v in e.get("voices", [])
+    """Who the clip's voices are, by voice id: the person a print from this clip was recorded under (their name, or
+    their id while nobody has named them), when it is the print of a voice in the clip's transcript as it is now, so a
+    transcript redone since names nobody until the next build, and a voice named in a transcript of the clip is named
+    here too."""
+    recorded = [(v["print"], e["name"] or e["id"]) for e in known(clip.parent.parent / "people.json") for v in e.get("voices", [])
                 if v["at"] == library.name_of(clip)]
     return {v["voice"]: name for v in sc.get("transcript", {}).get("voices", []) for p, name in recorded
             if v["print"] == p}
@@ -199,7 +240,7 @@ def of(clip: Path, sc: dict) -> dict | None:
     if not subject:
         return None
     s = unit(subject["print"])
-    here = [p for p in known(clip.parent.parent / "people.json") if library.name_of(clip) in p["clips"]]
+    here = [p for p in known(clip.parent.parent / "people.json") if p.get("print") and library.name_of(clip) in p["clips"]]
     p = max(here, key=lambda p: float(unit(p["print"]) @ s), default=None)
     if p is None or float(unit(p["print"]) @ s) < face.SAME:
         return None
