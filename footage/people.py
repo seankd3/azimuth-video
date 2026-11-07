@@ -24,11 +24,10 @@ from pathlib import Path
 
 import numpy as np
 
-from . import library, sidecar
+from . import face, library, sidecar
 from .passes import fresh
 
-SAME = 0.363  # SFace cosine similarity at which two faces are the same person (OpenCV's recommended threshold)
-ACROSS = 0.45  # stricter across clips, comparing every member: splitting one person is harmless, merging two is not
+ACROSS = 0.95  # stricter than face.SAME across clips, comparing every member: splitting one person is harmless, merging two is not
 VOICE = 0.72  # TitaNet cosine at which a voice is a known person's: on four recordings one person scored 0.79 to 0.90
 #              across files, and two different people at most 0.63
 
@@ -44,7 +43,7 @@ def tracks(measured: dict) -> list[dict]:
     for d in sorted(measured.get("faces", []), key=lambda d: -d["height"]):
         p = unit(d["print"])
         best = max(out, key=lambda t: float(t["print"] @ p), default=None)
-        if best is not None and float(best["print"] @ p) >= SAME:
+        if best is not None and float(best["print"] @ p) >= face.SAME:
             best["members"].append(d)
             best["print"] = unit(np.mean([unit(m["print"]) for m in best["members"]], axis=0))
         else:
@@ -99,7 +98,7 @@ def build(lib: Path, report: list) -> None:
         used = set()
         for p in people:
             match = max((k for k in faces if k["id"] not in used), key=lambda k: float(unit(k["print"]) @ p["print"]), default=None)
-            if match is not None and float(unit(match["print"]) @ p["print"]) >= SAME:
+            if match is not None and float(unit(match["print"]) @ p["print"]) >= face.SAME:
                 p["id"], p["name"], p["skin_stops"] = match["id"], match.get("name"), match.get("skin_stops")
                 p["voices"] = match.get("voices", [])
             else:
@@ -202,6 +201,6 @@ def of(clip: Path, sc: dict) -> dict | None:
     s = unit(subject["print"])
     here = [p for p in known(clip.parent.parent / "people.json") if library.name_of(clip) in p["clips"]]
     p = max(here, key=lambda p: float(unit(p["print"]) @ s), default=None)
-    if p is None or float(unit(p["print"]) @ s) < SAME:
+    if p is None or float(unit(p["print"]) @ s) < face.SAME:
         return None
     return {"id": p["id"], "name": p["name"], "skin_stops": p["skin_stops"]}
