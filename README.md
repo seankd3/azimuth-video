@@ -55,7 +55,7 @@ it stops, and search leaves it out and says how many clips it skipped sections o
     A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
     documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
 
-Kdenlive and DaVinci Resolve open the same timeline files. A timeline can also hold title cards (an OTIO
+Edits are made in code: an agent writes the timeline, and the toolkit grades and renders it. A timeline can also hold title cards (an OTIO
 GeneratorReference of kind `title`) and music, and `python -m footage.music TRACK` finds a track's beats and
 loudness so cuts can land on the beat.
 
@@ -88,17 +88,15 @@ take only what the desktop leaves.
 
 This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Spark GPU.
 
-- Python 3.12 with numpy, scipy, colour-science, opentimelineio, opencv-python-headless, onnx-asr, sherpa-onnx and
-  pillow, plus torch and torchvision built for CUDA, transformers and sentence-transformers.
+- Python 3.12 with numpy, scipy, colour-science, opentimelineio, opencv-python-headless, onnx-asr and pillow,
+  plus torch and torchvision built for CUDA, transformers and sentence-transformers.
+- `onnxruntime-gpu` (Microsoft's aarch64 wheels for CUDA 13) with NVIDIA's `nvidia-curand` wheel beside torch's CUDA
+  wheels, so Parakeet, Silero and TitaNet run on the GPU. With the CPU `onnxruntime` they run on the CPU.
 - `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC, zscale and 10/12-bit x265 (for example, a BtbN build).
 - LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`), for RAW clips.
-- Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), NeMo TitaNet
-  (sherpa-onnx), Parakeet TDT 0.6B v2, and EmbeddingGemma 2 (`google/embeddinggemma-2`, as `embeddinggemma-2`). Keep the folder read-only (`chmod -R a-w`): a section is identified
+- Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), NVIDIA's TitaNet-large
+  (exported to ONNX with NeMo, as `titanet-large-nvidia`), Parakeet TDT 0.6B v2, and EmbeddingGemma 2 (`google/embeddinggemma-2`, as `embeddinggemma-2`). Keep the folder read-only (`chmod -R a-w`): a section is identified
   by its models' file names and sizes, so a new model or version goes in under a new name, never over an old file.
-- Optional: [Gyroflow](https://github.com/gyroflow/gyroflow) for shots that shake too much for the built-in
-  stabilizer. Since 1.7 it can measure motion from the picture alone (`--optical-correction 100`), and it corrects
-  rolling shutter. For anamorphic footage, give it a lens profile with the squeeze as `input_horizontal_stretch`.
-  Its output (ProRes 422 HQ, 10-bit, the source's size and timing) can replace the clip in a timeline.
 
 ## Site settings
 

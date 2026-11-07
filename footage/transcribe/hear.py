@@ -1,4 +1,7 @@
-"""What was said in a recording, when, and by which voice: Parakeet words and clustered TitaNet voiceprints."""
+"""What was said in a recording, when, and by which voice: Parakeet words and clustered TitaNet voiceprints.
+
+TitaNet-large is NVIDIA's own release, exported to ONNX with NVIDIA NeMo and run by onnxruntime; `features` is NeMo's
+mel front end in numpy, with NeMo's own filters, matching it to 3e-5."""
 import subprocess
 from functools import cache
 from pathlib import Path
@@ -7,15 +10,17 @@ import numpy as np
 
 from .. import models, probe
 
-VERSION = 3  # bump when transcription, voices, voiceprints or the transcript's shape change
+VERSION = 4  # bump when transcription, voices, voiceprints or the transcript's shape change
 PARAKEET = models.FOLDER / "parakeet-tdt-0.6b-v2"
-TITANET = models.FOLDER / "nemo_en_titanet_small.onnx"
+TITANET = models.FOLDER / "titanet-large-nvidia"
 RATE = 16000
 FRAME = 0.08  # Parakeet's time step: 10 ms features, subsampled 8x
 WINDOW, HOP = 1.5, 0.75  # a voice is judged on 1.5 s of speech every 0.75 s,
 NEAR, FINE, FINE_HOP = 1.5, 0.75, 0.25  # and again on 0.75 s every 0.25 s within 1.5 s of a change of voice
 MOST = 8  # the most voices told apart when the count is not given
 EVIDENCE = 4  # prints (about 3.75 s of speech) a voice needs to be told apart from the others
+ONE_VOICE = 0.7  # voices whose prints are this alike are one person: one presenter's split voices measured 0.88 to
+# 0.95 alike, and a second person 0.12 to 0.18
 
 
 def identity(sc: dict) -> dict:
@@ -30,15 +35,37 @@ def recognizer():
     # thread, which halved the speed on a busy machine.
     so = rt.SessionOptions()
     so.add_session_config_entry("session.intra_op.allow_spinning", "0")
-    return onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v2", str(PARAKEET), sess_options=so).with_vad(
-        onnx_asr.load_vad("silero")).with_timestamps()
+    run = models.providers()
+    return onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v2", str(PARAKEET), sess_options=so, providers=run).with_vad(
+        onnx_asr.load_vad("silero", providers=run)).with_timestamps()
 
 
 @cache
 def embedder():
-    import sherpa_onnx
-    return sherpa_onnx.SpeakerEmbeddingExtractor(sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-        model=str(TITANET), num_threads=8))
+    import onnxruntime as rt
+    so = rt.SessionOptions()
+    so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    return rt.InferenceSession(str(TITANET / "titanet_large.onnx"), so, providers=models.providers())
+
+
+@cache
+def filters() -> tuple[np.ndarray, np.ndarray]:
+    """NeMo's mel filters (80 x 257) and its 400-sample Hann window, centred in the 512-point FFT."""
+    window = np.zeros(512, np.float32)
+    window[56:456] = np.load(TITANET / "window.npy")
+    return np.load(TITANET / "mel_filters.npy"), window
+
+
+def features(x: np.ndarray) -> tuple[np.ndarray, int]:
+    """TitaNet's input for samples at RATE: NeMo's eval-mode log-mel features (pre-emphasis 0.97, 25 ms windows every
+    10 ms, 80 mels, each normalized over the frames), padded to a multiple of 16 frames, and how many frames are real."""
+    fb, window = filters()
+    x = np.concatenate([x[:1], x[1:] - 0.97 * x[:-1]]).astype(np.float32)
+    frames = np.lib.stride_tricks.sliding_window_view(np.pad(x, 256), 512)[::160]
+    valid = len(x) // 160
+    mel = np.log((np.abs(np.fft.rfft(frames * window, axis=1)) ** 2) @ fb.T + 2 ** -24).T[:, :valid]
+    mel = (mel - mel.mean(1, keepdims=True)) / (mel.std(1, ddof=1, keepdims=True) + 1e-5)
+    return np.pad(mel, ((0, 0), (0, -valid % 16))).astype(np.float32), valid
 
 
 def audio(clip: Path) -> np.ndarray:
@@ -93,13 +120,10 @@ def windows(spans: list, size: float, hop: float) -> list:
 
 def prints(a: np.ndarray, spans: list) -> np.ndarray:
     """Each span's voiceprint, as a unit vector."""
-    e = embedder()
     out = []
     for s, t in spans:
-        stream = e.create_stream()
-        stream.accept_waveform(RATE, a[int(s * RATE):int(t * RATE)])
-        stream.input_finished()
-        out.append(e.compute(stream))
+        mel, valid = features(a[int(s * RATE):int(t * RATE)])
+        out.append(embedder().run(["embs"], {"audio_signal": mel[None], "length": np.array([valid], np.int64)})[0][0])
     v = np.array(out, dtype=np.float64)
     return v / np.linalg.norm(v, axis=1, keepdims=True)
 
@@ -148,17 +172,24 @@ def clusters(X: np.ndarray, count: int | None = None) -> list:
 
 
 def join(X: np.ndarray, labels: list, count: int | None = None) -> list:
-    """Voices joined, most alike first. Without a count, a voice with too few prints to judge (EVIDENCE) joins the
-    voice it is most like; with one, the two most alike voices join until there are `count`."""
+    """Voices joined, most alike first. Without a count, two voices at least ONE_VOICE alike are one, and then a voice
+    with too few prints to judge (EVIDENCE) joins the voice it is most like; with one, the two most alike voices join
+    until there are `count`."""
     while True:
         centre = centres(X, labels)
         sizes = {k: labels.count(k) for k in centre}
         alike = lambda pair: float(centre[pair[0]] @ centre[pair[1]])
+        if len(sizes) == 1:
+            return labels
         if count is None:
+            pair = max(((p, q) for p in centre for q in centre if p < q), key=alike)
             small = min(sizes, key=sizes.get)
-            if sizes[small] >= EVIDENCE or len(sizes) == 1:
+            if alike(pair) >= ONE_VOICE:
+                gone, into = sorted(pair, key=sizes.get)
+            elif sizes[small] < EVIDENCE:
+                gone, into = max(((small, k) for k in centre if k != small), key=alike)
+            else:
                 return labels
-            gone, into = max(((small, k) for k in centre if k != small), key=alike)
         elif len(sizes) > count:
             gone, into = max(((p, q) for p in centre for q in centre if p < q), key=alike)
         else:
