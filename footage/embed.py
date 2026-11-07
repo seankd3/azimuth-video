@@ -9,6 +9,7 @@ switched off, so nothing it reads leaves it.
 """
 import math
 import os
+from fractions import Fraction
 from concurrent.futures import ThreadPoolExecutor
 from functools import cache
 from io import BytesIO
@@ -58,7 +59,9 @@ def embed(clip: Path, sc: dict) -> dict:
     from PIL import Image
     d = sc["facts"]["duration"]
     spans = windows(d)
-    seconds = [(k + min(k + 1, d)) / 2 for k in range(math.ceil(d))]  # the middle of each second
+    # The middle of each second, but never in the last two frames: a seek there can find no frame to decode.
+    last = d - 2 / float(Fraction(sc["facts"]["fps"]))
+    seconds = [min((k + min(k + 1, d)) / 2, last) for k in range(math.ceil(d))]
     with ThreadPoolExecutor(8) as pool:
         frames = list(pool.map(lambda t: np.asarray(Image.open(BytesIO(jpeg(clip, sc, t, WIDTH))).convert("RGB")), seconds))
     # The frames are already one a second, so the processor keeps them all.

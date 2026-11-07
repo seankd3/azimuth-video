@@ -11,7 +11,6 @@ gamut). That identity is part of view.identity, so changing any of them puts eve
 date at once, and the next run develops the clip again.
 """
 import ctypes
-import ctypes.util
 import hashlib
 import json
 import os
@@ -33,6 +32,10 @@ DEMOSAIC = 3  # LibRaw's AHD
 QUALITY = 4  # x265 CRF: near-lossless at 12 bits
 DECODERS = 3  # frames developed at once; each LibRaw decode also uses several threads
 FOLDER = ".developed"
+# LibRaw built from source with its 2 GB cap on CR3 and CRM files raised (LIBRAW_MAX_CR3_RAW_FILE_SIZE): a minute of 8K
+# RAW is about 11 GB, and the packaged build refuses any file over 2 GB as "too big for processing".
+LIBRAW = Path.home() / ".local/share/footage/vendor/libraw"
+TOOLS = {**os.environ, "LD_LIBRARY_PATH": str(LIBRAW / "lib")}
 
 
 def raw(sc: dict) -> bool:
@@ -41,7 +44,7 @@ def raw(sc: dict) -> bool:
 
 @cache
 def libraw() -> str:
-    lib = ctypes.CDLL(ctypes.util.find_library("raw") or "libraw.so")
+    lib = ctypes.CDLL(str(LIBRAW / "lib/libraw.so"))
     lib.libraw_version.restype = ctypes.c_char_p
     return lib.libraw_version().decode()
 
@@ -62,7 +65,8 @@ def path(clip: Path, sc: dict) -> Path:
 def layout(clip: Path) -> tuple[int, tuple[int, int], np.ndarray]:
     """How many frames LibRaw finds in the file, the size it develops them at, and its camera-to-Rec.709 matrix for
     white-balanced camera RGB."""
-    out = subprocess.run(["raw-identify", "-v", str(clip)], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([str(LIBRAW / "bin/raw-identify"), "-v", str(clip)], capture_output=True, text=True, check=True,
+                         env=TOOLS).stdout
     frames = int(re.search(r"Number of raw images: (\d+)", out).group(1))
     size = tuple(int(v) for v in re.search(r"Output size: +(\d+) x (\d+)", out).groups())
     rows = re.search(r"Camera2RGB matrix[^\n]*\n" + r"([-\d.\s]+)\n" * 3, out).groups()
@@ -71,8 +75,8 @@ def layout(clip: Path) -> tuple[int, tuple[int, int], np.ndarray]:
 
 def frame(clip: Path, n: int) -> bytes:
     """Frame n as a 16-bit linear PPM in white-balanced camera RGB, where 65535 is the sensor's saturation."""
-    return subprocess.run(["dcraw_emu", "-s", str(n), "-4", "-w", "-o", "0", "-H", "0", "-q", str(DEMOSAIC), "-Z", "-",
-                           str(clip)], capture_output=True, check=True, env={**os.environ, "OMP_NUM_THREADS": "8"}).stdout
+    return subprocess.run([str(LIBRAW / "bin/dcraw_emu"), "-s", str(n), "-4", "-w", "-o", "0", "-H", "0", "-q", str(DEMOSAIC), "-Z", "-",
+                           str(clip)], capture_output=True, check=True, env={**TOOLS, "OMP_NUM_THREADS": "8"}).stdout
 
 
 def develop(clip: Path, sc: dict) -> Path:

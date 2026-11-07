@@ -89,7 +89,9 @@ This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Sp
 - `onnxruntime-gpu` (Microsoft's aarch64 wheels for CUDA 13) with NVIDIA's `nvidia-curand` wheel beside torch's CUDA
   wheels, so Parakeet, Silero and TitaNet run on the GPU. With the CPU `onnxruntime` they run on the CPU.
 - `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC, zscale and 10/12-bit x265 (for example, a BtbN build).
-- LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`), for RAW clips.
+- LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`, `libraw.so`), for RAW clips, built from source into
+  `~/.local/share/footage/vendor/libraw` with `-DLIBRAW_MAX_CR3_RAW_FILE_SIZE` raised: packaged builds refuse a RAW
+  clip over 2 GB, about 11 seconds of 8K.
 - Models in `~/.local/share/footage/models`: Google's BlazeFace full range and dlib's face recognition, NVIDIA's TitaNet-large
   (exported to ONNX with NeMo, as `titanet-large-nvidia`), Parakeet TDT 0.6B v2, and EmbeddingGemma 2 (`google/embeddinggemma-2`, as `embeddinggemma-2`). Keep the folder read-only (`chmod -R a-w`): a section is identified
   by its models' file names and sizes, so a new model or version goes in under a new name, never over an old file.
