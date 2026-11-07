@@ -1,18 +1,23 @@
-"""Describe one filed clip with the local vision model, from desqueezed frames sampled across the take."""
-import base64
+"""Describe one filed clip: the toolkit asks a question about desqueezed frames sampled across the take, and whoever
+the site names as its describer (an agent, or a vision model with a small script around it) answers it.
+
+A question is a folder, LIBRARY/.questions/DAY/FILE/KEY/: the frames in order and question.json, which holds the prompt
+and the answer's schema. KEY names what the question was asked from (the description's id and the clip's bytes), so an
+answer always belongs to the question in its folder; new inputs are a new question. The describer writes answer.json
+beside them. The next run checks it and stores it, then retires the question.
+"""
 import hashlib
 import json
-import urllib.request
+import shutil
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from pathlib import Path
 
-from . import config, view
+from . import config, sidecar, view
 from .frame import jpeg
 
 VERSION = 1  # bump when the prompt, schema or frame sampling changes
 
-ENDPOINT = "http://127.0.0.1:1234/v1/chat/completions"
-MODEL = "qwen/qwen3.5-35b-a3b"
 WIDTH = 1280
 
 SCHEMA = {
@@ -48,18 +53,11 @@ PROMPT = (
 
 
 def identity(sc: dict) -> dict:
-    """The served model is named, not hashed: LM Studio owns its files."""
-    context = config.load().get("context") or ""
-    return {"describe": VERSION, "model": MODEL, "context": hashlib.sha1(context.encode()).hexdigest()[:12], **view.identity(sc)}
-
-
-def available() -> bool:
-    """Whether the local server offers MODEL; without it there is nothing to describe with, so skip quickly."""
-    try:
-        listed = json.load(urllib.request.urlopen(ENDPOINT.replace("chat/completions", "models"), timeout=5))
-    except OSError:
-        return False
-    return any(m["id"] == MODEL for m in listed["data"])
+    """Who answers is a setting, so naming a new describer redoes every description."""
+    site = config.load()
+    context = site.get("context") or ""
+    return {"describe": VERSION, "describer": site.get("describer"), "context": hashlib.sha1(context.encode()).hexdigest()[:12],
+            **view.identity(sc)}
 
 
 def times(duration: float) -> list[float]:
@@ -67,8 +65,8 @@ def times(duration: float) -> list[float]:
     return [round(duration * (i + 0.5) / n, 2) for i in range(n)]
 
 
-def frame(clip: Path, sc: dict, t: float) -> str:
-    return base64.b64encode(jpeg(clip, sc, t, WIDTH)).decode()
+def frame(clip: Path, sc: dict, t: float, out: Path) -> None:
+    out.write_bytes(jpeg(clip, sc, t, WIDTH))
 
 
 def valid_moments(moments: list, duration: float) -> list:
@@ -80,20 +78,76 @@ def valid_moments(moments: list, duration: float) -> list:
     return out
 
 
-def describe(clip: Path, sc: dict) -> dict:
-    f = sc["facts"]
-    ts = times(f["duration"])
+def misfit(value, schema: dict, at: str = "answer") -> str | None:
+    """What in `value` breaks `schema` (the part of JSON Schema that SCHEMA uses), or None."""
+    if "enum" in schema:
+        return None if value in schema["enum"] else f"{at} is not one of {schema['enum']}"
+    kind = {"object": dict, "array": list, "string": str, "integer": int, "number": (int, float), "boolean": bool}[schema["type"]]
+    if not isinstance(value, kind) or (isinstance(value, bool) and schema["type"] != "boolean"):
+        return f"{at} is not {schema['type']}"
+    if schema["type"] == "object":
+        if set(value) != set(schema["required"]):
+            return f"{at} needs exactly the keys {schema['required']}"
+        return next((m for k, v in value.items() if (m := misfit(v, schema["properties"][k], f"{at}.{k}"))), None)
+    if schema["type"] == "array":
+        return next((m for i, v in enumerate(value) if (m := misfit(v, schema["items"], f"{at}[{i}]"))), None)
+    return None
+
+
+def question(clip: Path, sc: dict) -> Path:
+    """Where the clip's question for its current inputs lives."""
+    key = hashlib.sha1(json.dumps([identity(sc), sc["facts"]["sha256"]], sort_keys=True).encode()).hexdigest()[:12]
+    return clip.parent.parent / ".questions" / clip.parent.name / clip.name / key
+
+
+def ask(clip: Path, sc: dict, here: Path) -> None:
+    """Write the question beside its place and move it in whole, so a question folder is always complete."""
+    part = here.with_name(here.name + ".part")
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir(parents=True)
+    ts = times(sc["facts"]["duration"])
+    names = [f"{i:02d}.jpg" for i in range(1, len(ts) + 1)]
     with ThreadPoolExecutor(8) as pool:
-        frames = list(pool.map(lambda t: frame(clip, sc, t), ts))
+        list(pool.map(lambda t, name: frame(clip, sc, t, part / name), ts, names))
     context = config.load().get("context")
-    text = PROMPT.format(n=len(ts), dur=f["duration"], times=", ".join(f"{t:g}" for t in ts),
-                         context=f" {context}" if context else "")
-    content = [{"type": "text", "text": text}]
-    content += [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b}"}} for b in frames]
-    body = {"model": MODEL, "temperature": 0.2, "reasoning_effort": "none", "messages": [{"role": "user", "content": content}],
-            "response_format": {"type": "json_schema", "json_schema": {"name": "take", "strict": True, "schema": SCHEMA}}}
-    req = urllib.request.Request(ENDPOINT, json.dumps(body).encode(), {"Content-Type": "application/json"})
-    reply = json.load(urllib.request.urlopen(req, timeout=900))
-    d = json.loads(reply["choices"][0]["message"]["content"])
-    d["moments"] = valid_moments(d["moments"], f["duration"])
-    return {"frames_at": ts, **d}
+    prompt = PROMPT.format(n=len(ts), dur=sc["facts"]["duration"], times=", ".join(f"{t:g}" for t in ts),
+                           context=f" {context}" if context else "")
+    (part / "question.json").write_text(json.dumps(
+        {"prompt": prompt, "frames": names, "answer": "Write one JSON object that fits schema to answer.json here.",
+         "schema": SCHEMA}, indent=1))
+    part.rename(here)
+
+
+def describe(clip: Path, sc: dict) -> dict | None:
+    """The clip's description from the answer to its current question, or None while that question waits for one."""
+    here = question(clip, sc)
+    if not here.exists():
+        ask(clip, sc, here)
+        return None
+    try:
+        d = json.loads((here / "answer.json").read_text())
+    except FileNotFoundError:
+        return None
+    if problem := misfit(d, SCHEMA):
+        raise ValueError(f"{here / 'answer.json'}: {problem}")
+    d["moments"] = valid_moments(d["moments"], sc["facts"]["duration"])
+    return {"frames_at": times(sc["facts"]["duration"]), **d}
+
+
+def retire(library: Path) -> None:
+    """Remove each question whose answer is stored, or that its clip would no longer be asked, and anything else beside
+    the questions (a describer's stray file is not a question)."""
+    for here in library.glob(".questions/*/*/*"):
+        clip = library / here.parent.parent.name / here.parent.name
+        try:
+            sc = sidecar.read(clip)
+        except ValueError:
+            continue  # the passes report the sidecar; its question waits
+        if sc is None or here != question(clip, sc) or sc.get("description", {}).get("id") == identity(sc):
+            if here.is_dir() and not here.is_symlink():
+                shutil.rmtree(here)
+            else:
+                here.unlink()
+    for empty in [*library.glob(".questions/*/*"), *library.glob(".questions/*")]:
+        with suppress(OSError):
+            empty.rmdir()

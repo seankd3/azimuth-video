@@ -1,7 +1,7 @@
 # Azimuth Video
 
 Azimuth Video is a local, agent-friendly toolkit for camera footage. It files clips, describes and measures them,
-and renders graded edits. All the models run on your own machine.
+and renders graded edits. Its models run on your own machine; the describer is whichever agent or vision model you name.
 
 Each clip gets one JSON sidecar next to it. The sidecar holds everything the toolkit knows about the clip. Search,
 selects and timelines read these sidecars, so an AI agent can find shots and build edits from them.
@@ -17,7 +17,11 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 2. **Develop RAW.** LibRaw develops every frame of a RAW clip into the code values the camera records (its log curve
    and gamut), stored as all-intra 12-bit 4:4:4 HEVC in the day's `.developed/` folder. Every step below reads a RAW
    clip's pictures from there, and its sidecar ids record the development, so a new development redoes them.
-3. **Describe.** A local vision model writes a summary, tags, shot size, camera movement and usable moments for each clip.
+3. **Describe.** It writes a question for each clip into `LIBRARY/.questions/DAY/FILE/KEY/`: frames sampled across the
+   take and `question.json`, with the prompt and the answer's schema. Your describer (an AI agent, or a vision model
+   with a small script around it) writes `answer.json` beside them: a summary, tags, shot size, camera movement and
+   usable moments. The next run checks each answer, stores it and then removes the question; a bad answer is reported
+   and stays. KEY changes when what the question was asked from changes, so a late answer never lands on a new question.
 4. **Transcribe.** Parakeet transcribes the speech, and voiceprints of every 1.5 s of it, clustered, tell the voices
    apart. The same transcriber runs on any recording: `python -m footage.transcribe FILE` writes its words, Markdown
    and SRT/VTT subtitles. A clip's sidecar and a recording's `.transcript.json` hold one shape: every word with its
@@ -88,7 +92,6 @@ This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Sp
   pillow, plus torch and torchvision built for CUDA, transformers and sentence-transformers.
 - `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC, zscale and 10/12-bit x265 (for example, a BtbN build).
 - LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`), for RAW clips.
-- LM Studio, serving `qwen/qwen3.5-35b-a3b`, for the descriptions.
 - Models in `~/.local/share/footage/models`: YuNet and SFace (OpenCV Zoo), NeMo TitaNet
   (sherpa-onnx), Parakeet TDT 0.6B v2, and EmbeddingGemma 2 (`google/embeddinggemma-2`, as `embeddinggemma-2`). Keep the folder read-only (`chmod -R a-w`): a section is identified
   by its models' file names and sizes, so a new model or version goes in under a new name, never over an old file.
@@ -104,7 +107,8 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
 
 ```json
 {
-  "context": "One sentence about what the footage shows, given to the description model.",
+  "context": "One sentence about what the footage shows, given to the describer.",
+  "describer": "agent or model name",
   "timezone": "Area/City",
   "look": "cinema",
   "cameras": [{"model_prefix": "Canon EOS", "squeeze": 1.6, "log": "Canon Log 3", "gamut": "Cinema Gamut"}]
@@ -112,6 +116,8 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
 ```
 
 - Without a timezone, shooting days follow the system's local time.
+- `describer` names who answers the description questions. It is part of each description's id, so naming another
+  describer redoes every description.
 - `look` is the house look: every render and still uses it, so every clip is printed the same way, unless a timeline's
   `metadata["footage"]["look"]` or `--look` names another. Each shot still gets its own white balance and exposure first.
 - Without a matching camera rule, a clip's squeeze is unknown. Set it with `python -m footage.assume CLIP squeeze=1.6`.

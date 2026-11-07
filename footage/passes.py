@@ -15,15 +15,14 @@ from . import describe, embed, focus, measure, probe, steady, transcribe
 @dataclass
 class Pass:
     section: str
-    run: Callable[[Path, dict], dict]
+    run: Callable[[Path, dict], dict | None]  # None: nothing to store yet
     identity: Callable[[dict], dict]
     workers: int
-    available: Callable[[], bool] = lambda: True
 
 
 PASSES = [
-    # Two requests keep the model busy while the next frames are cut.
-    Pass("description", describe.describe, describe.identity, 2, describe.available),
+    # Writes questions, and takes the answers its describer left; see describe.py.
+    Pass("description", describe.describe, describe.identity, 2),
     Pass("transcript", transcribe.clip, transcribe.identity, 1),
     Pass("measured", measure.measure, measure.identity, 4),
     # These two read every frame on the GPU decoder.

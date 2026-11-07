@@ -8,7 +8,7 @@ import fcntl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import develop, idle, library, people, probe, sidecar
+from . import describe, develop, idle, library, people, probe, sidecar
 from .passes import PASSES, Pass, current
 
 
@@ -27,14 +27,12 @@ def fill(lib: Path, p: Pass, report: list) -> None:
                 todo.append(clip)
         except Exception as e:
             report.append((f"no {p.section}", f"{clip.parent.name}/{clip.name}", str(e)[:160]))
-    if todo and not p.available():
-        report.append((f"no {p.section}: its model is not available", f"{len(todo)} clips", None))
-        return
 
     def job(clip):
         sc = sidecar.read(clip)
         return clip, p.identity(sc), p.run(clip, sc)
 
+    waiting = 0
     with ThreadPoolExecutor(p.workers) as pool:
         jobs = [pool.submit(job, clip) for clip in todo]
         for i, done in enumerate(as_completed(jobs), 1):
@@ -43,13 +41,17 @@ def fill(lib: Path, p: Pass, report: list) -> None:
                 # Written into the sidecar as it is now, so an edit made during the pass stays; a result whose inputs
                 # changed meanwhile is dropped, and the next run redoes it.
                 same = lambda sc: sc is not None and probe.unchanged(clip, sc["facts"]) and p.identity(sc) == made_from
-                if sidecar.update(clip, lambda sc: {**sc, p.section: {"id": made_from, **section}} if same(sc) else None):
+                if section is None:  # a question now waits for its answer
+                    waiting += 1
+                elif sidecar.update(clip, lambda sc: {**sc, p.section: {"id": made_from, **section}} if same(sc) else None):
                     report.append((p.section, clip.name, clip.parent.name))
                 else:
                     report.append((f"no {p.section}: its inputs changed during the pass", clip.name, clip.parent.name))
             except Exception as e:  # the clip keeps its gap and the next run retries it
                 report.append((f"{p.section} failed", "", repr(e)[:200]))
             print(f"  {p.section} {i}/{len(todo)}", flush=True)
+    if waiting:
+        report.append((f"no {p.section}: waiting for answers", f"{waiting} clips", None))
 
 
 def main() -> None:
@@ -69,6 +71,7 @@ def main() -> None:
         develop.build(a.library, report)
         for p in PASSES:
             fill(a.library, p, report)
+        describe.retire(a.library)
         people.build(a.library, report)
     counts: dict = {}
     for what, *_ in report:
