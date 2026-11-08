@@ -50,6 +50,9 @@ class Look:
     night: float = 0.0  # share of colour a dark shot loses in its deepest shadows, as the eye does at night
     headroom: float | None = None  # most stops the 99th percentile may land above diffuse white; None: no limit
     shadows: float = 0.0  # share of the shadows' own grey balance applied: 1 makes grey grey at every level
+    mood: float = 0.0  # stops darker for each stop of the scene's contrast (1st to 99th percentile) above mood_from:
+    #                   harder light is shown moodier
+    mood_from: float = 7.0  # contrast in stops at which mood starts; soft light measured about 7
 
 
 @cache
@@ -80,8 +83,9 @@ def dark(sc: dict, look: Look) -> bool:
 
 
 def exposure(sc: dict, look: Look) -> tuple[float, float]:
-    """Stops to apply: to bring the frame's average to the look's exposure, plus any correction a person set for the
-    shot (footage.assume CLIP exposure=-0.3), and the extra for a face shot.
+    """Stops to apply: to bring the frame's average to the look's exposure, darker by the look's mood for a shot with
+    harder light, plus any correction a person set for the shot (footage.assume CLIP exposure=-0.3), and the extra for
+    a face shot.
 
     In a face shot of someone with a skin level in people.json, exposure moves so their lit cheek sits at that level,
     so each person looks the same in every shot, against a bright window or not. Nobody else's face is moved: the
@@ -91,6 +95,7 @@ def exposure(sc: dict, look: Look) -> tuple[float, float]:
     stops = look.dark if dark(sc, look) else target(sc, look)  # ETTR comes down fully; a dark shot keeps its exposure
     if look.headroom is not None:  # and never so far that the brightest unclipped light goes past the shoulder
         stops = min(stops, WHITE + look.headroom - measured["range_stops"][1])
+    stops -= look.mood * max(0.0, measured["range_stops"][1] - measured["range_stops"][0] - look.mood_from)
     stops += sc["assumed"].get("exposure") or 0.0
     face, skin = measured.get("face"), (sc.get("person") or {}).get("skin_stops")
     if skin is None or not (face and face["height"] >= FACE_SHOT and face["in_frames"] * 2 >= face["of"]):
