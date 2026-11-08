@@ -26,6 +26,8 @@ MODEL = models.FOLDER / "embeddinggemma-2"
 WINDOW = 5  # seconds
 WIDTH = 1024  # more than the model's frame budget (140 tokens of 48 px), so frames are only ever shrunk
 KINDS = ("picture", "sound")
+# Windows the model reads at once. The GPU shares the machine's memory, and the default 32 reached 15 GB on a long clip.
+BATCH = 4
 
 
 def identity(sc: dict) -> dict:
@@ -66,10 +68,13 @@ def embed(clip: Path, sc: dict) -> dict:
         frames = list(pool.map(lambda t: np.asarray(Image.open(BytesIO(jpeg(clip, sc, t, WIDTH))).convert("RGB")), seconds))
     # The frames are already one a second, so the processor keeps them all.
     picture = model().encode([{"text": "<|video|>", "video": np.stack(frames[int(a):math.ceil(b)])} for a, b in spans],
-                             normalize_embeddings=True, processing_kwargs={"video": {"do_sample_frames": False}})
+                             normalize_embeddings=True, processing_kwargs={"video": {"do_sample_frames": False}},
+                             batch_size=BATCH)
     sound = audio(clip)
     heard = model().encode([{"text": "<|audio|>", "audio": sound[int(a * RATE):int(b * RATE)]} for a, b in spans],
-                           normalize_embeddings=True) if len(sound) else None
+                           normalize_embeddings=True, batch_size=BATCH) if len(sound) else None
+    import torch
+    torch.cuda.empty_cache()  # the GPU shares the machine's memory: hand back what this clip used
     return {"window": WINDOW, "picture": rows(picture), "sound": rows(heard) if heard is not None else None}
 
 
