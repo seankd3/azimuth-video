@@ -13,6 +13,7 @@ python -m footage.find hands wire --size close-up
 python -m footage.find --person p01 --json
 python -m footage.find --shows "a forklift backing up" --pulls
 python -m footage.find robot --moving --json    # the stretches where something moves, for an edit
+python -m footage.find --day 2026-11-07 --moving --best   # one clip per camera angle: the best of its takes (takes.py)
 python -m footage.find --sounds "a grinder" --day 2026-11-03
 python -m footage.find --like 2026-10-29/CLIP0001@12
 """
@@ -23,26 +24,9 @@ from pathlib import Path
 
 import numpy as np
 
-from . import embed, library, passes, people, sidecar
+from . import embed, focus, library, passes, people, sidecar, takes
 from .frame import seconds
 from .transcribe.formats import turns
-
-MOVING = 0.35  # thumbnail change per frame (grey levels) at which something in a locked-off shot is moving: a still
-#               machine read 0.1, a gripper working 0.4 to 0.5, a gantry swinging across the frame 1.4 to 1.8
-MOVING_SECONDS = 2  # shortest moving stretch worth listing
-
-
-def moving(sc: dict) -> list[tuple[int, float]]:
-    """Stretches of at least MOVING_SECONDS whole seconds in which the picture moves; the last may end mid-second."""
-    end, runs, start = sc["facts"]["duration"], [], None
-    for s, m in enumerate(sc.get("focus", {}).get("motion", []) + [0.0]):
-        if m >= MOVING:
-            start = s if start is None else start
-        elif start is not None:
-            if min(s, end) - start >= MOVING_SECONDS:
-                runs.append((start, round(min(s, end), 2)))
-            start = None
-    return runs
 
 def text(sc: dict) -> str:
     d, t = sc.get("description", {}), sc.get("transcript", {})
@@ -58,7 +42,7 @@ def record(clip: Path, sc: dict) -> dict:
     return {"clip": str(clip), "name": f"{clip.parent.name}/{clip.stem}", "seconds": round(sc["facts"]["duration"], 1),
             "size": d.get("shot_size"), "summary": d.get("summary"), "tags": d.get("tags", []),
             "person": sc.get("person"), "voices": sc.get("voices", {}),
-            "moving": moving(sc), "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
+            "moving": focus.moving(sc), "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
             "speech": [(t["start"], t["end"], t["text"]) for t in turns(sc.get("transcript", {}).get("words", []))]}
 
 
@@ -68,7 +52,7 @@ def matches(sc: dict, a, wanted: set) -> bool:
             and (not a.size or d.get("shot_size") == a.size)
             and (not a.person or bool(wanted & {who.get("id"), who.get("name"), *sc.get("voices", {}).values()}))
             and (not a.pulls or bool(sc.get("focus", {}).get("pulls")))
-            and (not a.moving or bool(moving(sc))))
+            and (not a.moving or bool(focus.moving(sc))))
 
 
 def line(r: dict) -> str:
@@ -103,6 +87,7 @@ if __name__ == "__main__":
     ap.add_argument("--person", help="a person's id or name from people.json, seen or heard")
     ap.add_argument("--pulls", action="store_true", help="only clips with a focus pull")
     ap.add_argument("--moving", action="store_true", help="only clips where something moves")
+    ap.add_argument("--best", action="store_true", help="only the best take of each angle (takes.py)")
     ap.add_argument("--day", help="shooting day, YYYY-MM-DD")
     ap.add_argument("--json", action="store_true", help="full records, for an agent")
     near = ap.add_mutually_exclusive_group()
@@ -112,15 +97,19 @@ if __name__ == "__main__":
     ap.add_argument("--top", type=int, default=20, help="how many moments (with --shows, --sounds or --like)")
     a = ap.parse_args()
     q = query(a)
-    found, behind = [], 0
+    found, behind, clips = [], 0, []
     wanted = people.called(a.person, a.library) if a.person else set()
     for c in library.clips(a.library):
         if (a.day and c.parent.name != a.day) or (sc := sidecar.read(c)) is None:  # folders are days
             continue
         sc, stale = passes.fresh(c, sc)
         behind += bool(stale)
+        clips.append((c, sc))
+    # An angle's best take is chosen among all its takes, whichever of them the words and filters match.
+    best = {g["best"] for g in takes.angles(clips)} if a.best else None
+    for c, sc in clips:
         sc["person"], sc["voices"] = people.of(c, sc), people.voiced(c, sc)
-        if matches(sc, a, wanted) and not (q and c == q[2]):
+        if matches(sc, a, wanted) and not (q and c == q[2]) and (best is None or c in best):
             found.append((record(c, sc), sc))
     if q:
         out = embed.nearest(found, q[0], q[1], a.top)

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import describe, embed, focus, measure, probe, transcribe
+from . import describe, embed, focus, measure, probe, takes, transcribe
 
 
 @dataclass
@@ -30,6 +30,8 @@ PASSES = [
     Pass("focus", focus.focus, focus.identity, 1),
     # One clip at a time: the model holds the GPU, and each clip's frames are cut 8 at once.
     Pass("embedding", embed.embed, embed.identity, 1),
+    # Three frames' features, for telling which clips are takes of one angle (takes.py).
+    Pass("angle", takes.angle, takes.identity, 2),
 ]
 OWNER = {p.section: p for p in PASSES}
 
