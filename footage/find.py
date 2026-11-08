@@ -1,8 +1,8 @@
 """Find shots in the Library: every clip whose sidecar matches all the words and filters, one line each.
 
 Words match anywhere in what the toolkit knows about a clip: its description, tags, moments, transcript, the
-person's name and the names of the voices heard. Each line shows the focus pulls and the speech,
-so a shot can be cut straight from the list. Sections that are out of date are left out of the search,
+person's name and the names of the voices heard. Each line shows the moving stretches (from the focus pass's
+motion), the focus pulls and the speech, so a shot can be cut straight from the list. Sections that are out of date are left out of the search,
 and the count of clips that had any is printed after the results.
 
 With --shows, --sounds or --like the answer is moments rather than clips: the windows of the clips found whose picture
@@ -12,6 +12,7 @@ its seconds and how near it is.
 python -m footage.find hands wire --size close-up
 python -m footage.find --person p01 --json
 python -m footage.find --shows "a forklift backing up" --pulls
+python -m footage.find robot --moving --json    # the stretches where something moves, for an edit
 python -m footage.find --sounds "a grinder" --day 2026-11-03
 python -m footage.find --like 2026-10-29/CLIP0001@12
 """
@@ -25,6 +26,22 @@ import numpy as np
 from . import embed, library, passes, people, sidecar
 from .frame import seconds
 from .transcribe.formats import turns
+
+MOVING = 1.0  # thumbnail change per frame (grey levels) at which something in a locked-off shot is moving
+MOVING_SECONDS = 2  # shortest moving stretch worth listing
+
+
+def moving(sc: dict) -> list[tuple[int, float]]:
+    """Stretches of at least MOVING_SECONDS whole seconds in which the picture moves; the last may end mid-second."""
+    end, runs, start = sc["facts"]["duration"], [], None
+    for s, m in enumerate(sc.get("focus", {}).get("motion", []) + [0.0]):
+        if m >= MOVING:
+            start = s if start is None else start
+        elif start is not None:
+            if min(s, end) - start >= MOVING_SECONDS:
+                runs.append((start, round(min(s, end), 2)))
+            start = None
+    return runs
 
 def text(sc: dict) -> str:
     d, t = sc.get("description", {}), sc.get("transcript", {})
@@ -40,7 +57,7 @@ def record(clip: Path, sc: dict) -> dict:
     return {"clip": str(clip), "name": f"{clip.parent.name}/{clip.stem}", "seconds": round(sc["facts"]["duration"], 1),
             "size": d.get("shot_size"), "summary": d.get("summary"), "tags": d.get("tags", []),
             "person": sc.get("person"), "voices": sc.get("voices", {}),
-            "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
+            "moving": moving(sc), "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
             "speech": [(t["start"], t["end"], t["text"]) for t in turns(sc.get("transcript", {}).get("words", []))]}
 
 
@@ -49,11 +66,13 @@ def matches(sc: dict, a, wanted: set) -> bool:
     return (all(w.lower() in text(sc) for w in a.words)
             and (not a.size or d.get("shot_size") == a.size)
             and (not a.person or bool(wanted & {who.get("id"), who.get("name"), *sc.get("voices", {}).values()}))
-            and (not a.pulls or bool(sc.get("focus", {}).get("pulls"))))
+            and (not a.pulls or bool(sc.get("focus", {}).get("pulls")))
+            and (not a.moving or bool(moving(sc))))
 
 
 def line(r: dict) -> str:
-    where = ([f"pulls {', '.join(f'{a:.1f}-{b:.1f}s' for a, b, _ in r['pulls'])}"] if r["pulls"] else []) + \
+    where = ([f"moving {', '.join(f'{a}-{b:g}s' for a, b in r['moving'])}"] if r["moving"] else []) + \
+            ([f"pulls {', '.join(f'{a:.1f}-{b:.1f}s' for a, b, _ in r['pulls'])}"] if r["pulls"] else []) + \
             ([f"speech {len(r['speech'])}"] if r["speech"] else [])
     who = (r["person"] or {}).get("name") or (r["person"] or {}).get("id") or ""
     return f"{r['name']:22} {r['seconds']:5.1f}s {r['size'] or '?':8} {who:6} {'; '.join(where):34} {r['summary']}"
@@ -82,6 +101,7 @@ if __name__ == "__main__":
     ap.add_argument("--size", choices=["close-up", "medium", "wide"])
     ap.add_argument("--person", help="a person's id or name from people.json, seen or heard")
     ap.add_argument("--pulls", action="store_true", help="only clips with a focus pull")
+    ap.add_argument("--moving", action="store_true", help="only clips where something moves")
     ap.add_argument("--day", help="shooting day, YYYY-MM-DD")
     ap.add_argument("--json", action="store_true", help="full records, for an agent")
     near = ap.add_mutually_exclusive_group()

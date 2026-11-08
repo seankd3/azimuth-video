@@ -6,6 +6,9 @@ changes a lot, one way (not the back-and-forth of hands crossing a shallow focus
 Its start and end are where 5% and 95% of the focus change has happened: cut just before one and just after the other.
 Each pull also records how still the picture was (motion, and pan from frame-to-frame phase correlation). A pull in a
 still shot gets `smooth`: the retime that makes it smoothest (smooth.py), which the render applies.
+
+`motion` is how much the picture changes, second by second: the mean change of the thumbnail from frame to frame,
+in grey levels. Footage is shot locked off, so it measures what moves in front of the camera.
 """
 import subprocess
 from pathlib import Path
@@ -15,7 +18,7 @@ from scipy.ndimage import median_filter, uniform_filter1d
 
 from . import view
 
-VERSION = 4
+VERSION = 5
 W, GX, GY = 640, 8, 4  # frames are read W pixels wide (smooth.py measures its retimes the same way)
 NET_MIN = 0.45  # mean change in log sharpness per second across regions
 COHERENT = 0.6  # net change over a second / the path it took: one way, not back and forth
@@ -121,4 +124,7 @@ def focus(clip: Path, sc: dict) -> dict:
     for p in found:
         still = p["motion"] <= STILL_MOTION and p["pan"] <= STILL_PAN
         p["smooth"] = smooth.best(clip, sc, sharp, *p["frames"]) if still else None
-    return {"pulls": found}
+    change = np.abs(np.diff(thumbs, axis=0)).mean((1, 2)) if len(thumbs) > 1 else np.zeros(0)
+    per = max(1, round(fps))
+    motion = [round(float(change[i:i + per].mean()), 2) for i in range(0, len(change), per)]
+    return {"pulls": found, "motion": motion}
