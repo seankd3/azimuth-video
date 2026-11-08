@@ -25,8 +25,9 @@ PASSES = [
     Pass("description", describe.describe, describe.identity, 2),
     Pass("transcript", transcribe.clip, transcribe.identity, 1),
     Pass("measured", measure.measure, measure.identity, 4),
-    # These two read every frame on the GPU decoder.
-    Pass("focus", focus.focus, focus.identity, 2),
+    # Reads every frame on the GPU decoder, one clip at a time: its frame buffers count as system memory on a
+    # shared-memory GPU, and two clips at once reached 15 GB.
+    Pass("focus", focus.focus, focus.identity, 1),
     # One clip at a time: the model holds the GPU, and each clip's frames are cut 8 at once.
     Pass("embedding", embed.embed, embed.identity, 1),
 ]
