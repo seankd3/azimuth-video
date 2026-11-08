@@ -27,7 +27,8 @@ from . import embed, library, passes, people, sidecar
 from .frame import seconds
 from .transcribe.formats import turns
 
-MOVING = 1.0  # thumbnail change per frame (grey levels) at which something in a locked-off shot is moving
+MOVING = 0.35  # thumbnail change per frame (grey levels) at which something in a locked-off shot is moving: a still
+#               machine read 0.1, a gripper working 0.4 to 0.5, a gantry swinging across the frame 1.4 to 1.8
 MOVING_SECONDS = 2  # shortest moving stretch worth listing
 
 
