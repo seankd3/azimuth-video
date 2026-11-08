@@ -1,0 +1,7 @@
+#!/bin/sh
+# footage [TOOL] [ARGS...]: run Azimuth Video's TOOL (python -m footage.TOOL), or with no TOOL the library run.
+# install.sh writes this to ~/.local/bin with the repository's place filled in.
+R="@REPO@"
+m=footage
+if [ -n "${1:-}" ] && { [ -e "$R/footage/$1.py" ] || [ -d "$R/footage/$1" ]; }; then m="footage.$1"; shift; fi
+PYTHONPATH="$R" exec "$R/.venv/bin/python" -m "$m" "$@"

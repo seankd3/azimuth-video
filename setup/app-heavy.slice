@@ -1,0 +1,15 @@
+[Unit]
+Description=Heavy media and model jobs (the heavy command): one 16 GB ceiling for all of them
+
+[Slice]
+# One heavy job runs at a time (heavy's lock): a library run peaks near 12 GB, and the desktop must never run short.
+# Over MemoryHigh the job is slowed and its memory reclaimed; at MemoryMax the kernel stops it. With no swap it can't
+# creep past the ceiling.
+MemoryHigh=15G
+MemoryMax=16G
+MemorySwapMax=0
+# When other work fills memory, systemd-oomd stopped the heavy job first every time, so it keeps 8 GB the rest can't
+# reclaim; its own ceiling still stops it at MemoryMax.
+MemoryLow=8G
+CPUWeight=20
+IOWeight=20

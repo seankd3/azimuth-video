@@ -19,7 +19,7 @@ import numpy as np
 from . import color, config
 
 LOOKS = Path(__file__).resolve().parent.parent / "looks"
-DEFAULT = config.load().get("look", "cinema")  # the house look: a timeline's own look or --look overrides it
+DEFAULT = config.load().get("look", "cinema-glow")  # the house look: a timeline's own look or --look overrides it
 SIZE = 33
 FACE_SHOT = 0.2  # a face at least this share of the frame height, in at least half the samples, makes a face shot
 FACE_LIFT = 1.0  # most a face shot's exposure moves to put its person at their skin level

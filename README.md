@@ -28,19 +28,24 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    voice, and every voice with its print. The code is the `footage/transcribe/` package: `hear.py` hears,
    `formats.py` writes the files.
 5. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
-6. **Find focus pulls.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
+6. **Find focus pulls and movement.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
+   Second by second, it also tells the camera's own movement apart from what moves in front of it, so `find --moving`
+   lists only stretches where something moves before a still camera, not a shaking one or the bump of the record button.
 7. **Recognize people.** It groups faces into people across the whole library, and knows people's voices once you
    name them in a transcript. You can add names to `people.json`.
 8. **Index.** EmbeddingGemma 2 turns every 5 seconds of a clip into two vectors, one for the picture and one for the
    sound, in the same space as text. Search can then rank moments by a phrase ("a forklift backing up"), by a sound
    ("a grinder"), or by how much they look like a moment of another clip. The model runs on your machine, with the
    Hugging Face hub switched off.
-9. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
+9. **Find takes.** Clips shot one after another from one camera position are takes of one angle: their backgrounds line up
+   (matched corner points of three frames). The best take is the last one, unless it lacks the action: then it is the
+   last take that moves at least half as long as the take that moves longest. `find --best` keeps only best takes.
+10. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
    - each shot gets its own exposure and white-balance correction;
    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
      its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
      walls), and lens vignette;
-   - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
+   - the looks are files in `looks/`: `cinema-glow` (the default house look), `cinema`, `classic`, `cinestill-800t`,
      `kodak-gold-200`, `portra-400`, `fuji-pro-400h`, `fuji-superia-400` and `scifi`, with stronger versions of CineStill and Gold.
      `python -m footage.grade` lists them;
    - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
@@ -63,6 +68,8 @@ python -m footage                     # file the inbox, then fill every sidecar 
 python -m footage.find hands --size close-up   # find shots; each line shows its focus pulls and speech
 python -m footage.find --shows "a forklift backing up" --top 10   # moments whose picture matches; --sounds for sound
 python -m footage.find --like 2026-10-29/CLIP0001@12   # moments that look like second 12 of that clip
+python -m footage.find --day 2026-10-29 --moving --best   # one clip per camera angle, its best take, where it moves
+python -m footage.takes --day 2026-10-29   # each angle's takes, with the best marked and why
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
 python -m footage.frame CLIP 02:05 [--out PATH.jpg]   # one desqueezed, ungraded frame of a clip (card, Ingest or Library), for a transcript's timestamp
@@ -81,22 +88,31 @@ The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the 
 with `metadata["footage"]["look"]`; `--look` overrides it. Runs and renders use idle CPU and disk priority, so they
 take only what the desktop leaves.
 
-## Requirements
+## Install
 
-This toolkit was built and tested on an ARM64 Linux laptop with an NVIDIA RTX Spark GPU.
+```bash
+git clone https://github.com/seankd3/azimuth-video ~/Projects/azimuth-video && ~/Projects/azimuth-video/install.sh
+```
 
-- Python 3.12 with numpy, scipy, colour-science, opentimelineio, opencv-python-headless, onnx-asr, pillow and dlib
-  (built with CUDA and cuDNN, so its face detector runs on the GPU),
-  plus torch and torchvision built for CUDA, transformers and sentence-transformers.
-- `onnxruntime-gpu` (Microsoft's aarch64 wheels for CUDA 13) with NVIDIA's `nvidia-curand` wheel beside torch's CUDA
-  wheels, so Parakeet, Silero and TitaNet run on the GPU. With the CPU `onnxruntime` they run on the CPU.
-- `ffmpeg` and `ffprobe`, plus `ffmpeg-gpu`: an FFmpeg build with NVDEC, zscale and 10/12-bit x265 (for example, a BtbN build).
-- LibRaw 0.22 or later (`dcraw_emu`, `raw-identify`, `libraw.so`), for RAW clips, built from source into
-  `~/.local/share/footage/vendor/libraw` with `-DLIBRAW_MAX_CR3_RAW_FILE_SIZE` raised: packaged builds refuse a RAW
-  clip over 2 GB, about 11 seconds of 8K.
-- Models in `~/.local/share/footage/models`: dlib's face detector, landmarks and recognition (as `dlib-faces`), NVIDIA's TitaNet-large
-  (exported to ONNX with NeMo, as `titanet-large-nvidia`), Parakeet TDT 0.6B v2, and EmbeddingGemma 2 (`google/embeddinggemma-2`, as `embeddinggemma-2`). Keep the folder read-only (`chmod -R a-w`): a section is identified
-  by its models' file names and sizes, so a new model or version goes in under a new name, never over an old file.
+`install.sh` sets up everything on a Linux machine (ARM64 or x86-64) with an NVIDIA GPU, and brings an install up to
+date when run again. It needs uv, curl, a C++ compiler, make and the CUDA toolkit; it downloads about 8 GB.
+
+- Python 3.12 in `.venv`, with the packages in `setup/requirements.txt`: torch and onnxruntime-gpu run the models on
+  the GPU, and dlib is built with CUDA so its face detector does too.
+- `ffmpeg-gpu`: FFmpeg 8.1 (a BtbN build) with NVDEC and 10-bit x265.
+- LibRaw 0.22.3, built with its 2 GB file cap raised: packaged builds refuse a RAW clip over 2 GB, about 11 seconds of 8K.
+- The models, in `~/.local/share/footage/models`, each file checked against its sha256 in `setup/models.txt`: dlib's
+  face detector, landmarks and recognition, Parakeet TDT 0.6B v2 and Silero VAD (onnx-asr's exports), EmbeddingGemma 2,
+  and NVIDIA's TitaNet-large, exported to ONNX on your machine with NVIDIA NeMo (`setup/titanet.py`). The folder is
+  read-only: a section is identified by its models' file names and sizes, so a new model or version goes in under a
+  new name, never over an old file.
+- `footage TOOL ARGS` in `~/.local/bin`, the same as `python -m footage.TOOL` in the environment, and `heavy NAME
+  COMMAND`, which runs a long job as a systemd user unit, one at a time, under a 16 GB memory ceiling
+  (`setup/app-heavy.slice`), so the desktop stays responsive.
+- The skills in `skills/`, linked into Claude Code and Codex: `azimuth-video` teaches an agent to offload a card, find
+  shots, describe clips and cut, grade and render edits in code; `transcribe` turns any recording into a transcript
+  with speaker labels. With them, you work by asking the agent ("offload the card and cut the shots where the robots move").
+- A starter `~/.config/azimuth-video/config.json` (from `setup/config.example.json`), if you have none.
 
 ## Site settings
 
@@ -108,7 +124,7 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
   "context": "One sentence about what the footage shows, given to the describer.",
   "describer": "agent or model name",
   "timezone": "Area/City",
-  "look": "cinema",
+  "look": "cinema-glow",
   "cameras": [{"model_prefix": "Canon EOS", "squeeze": 1.6, "log": "Canon Log 3", "gamut": "Cinema Gamut"}]
 }
 ```

@@ -1,0 +1,5 @@
+{
+  "context": "",
+  "describer": "claude-opus-5-5",
+  "cameras": [{"model_prefix": "Canon EOS", "squeeze": 1.6, "log": "Canon Log 3", "gamut": "Cinema Gamut"}]
+}

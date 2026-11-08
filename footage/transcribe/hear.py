@@ -13,6 +13,8 @@ from .. import models, probe
 VERSION = 4  # bump when transcription, voices, voiceprints or the transcript's shape change
 PARAKEET = models.FOLDER / "parakeet-tdt-0.6b-v2"
 TITANET = models.FOLDER / "titanet-large-nvidia"
+SILERO = models.FOLDER / "silero-vad"  # where speech is; not in identity(): its file has never changed since the first
+# transcript, and setup/models.txt pins it by sha256
 RATE = 16000
 FRAME = 0.08  # Parakeet's time step: 10 ms features, subsampled 8x
 WINDOW, HOP = 1.5, 0.75  # a voice is judged on 1.5 s of speech every 0.75 s,
@@ -37,7 +39,7 @@ def recognizer():
     so.add_session_config_entry("session.intra_op.allow_spinning", "0")
     run = models.providers()
     return onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v2", str(PARAKEET), sess_options=so, providers=run).with_vad(
-        onnx_asr.load_vad("silero", providers=run)).with_timestamps()
+        onnx_asr.load_vad("silero", str(SILERO), providers=run)).with_timestamps()
 
 
 @cache

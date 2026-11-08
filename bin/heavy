@@ -1,0 +1,22 @@
+#!/bin/sh
+# heavy NAME COMMAND...: run a heavy media or model job as the user unit NAME, guarded so it can't freeze the desktop.
+#
+# - It survives the app or terminal that started it: it is a systemd user unit (journalctl --user -u NAME).
+# - One at a time: it waits for any other heavy job to finish (a lock), then for 16 GB of free memory, so the desktop
+#   keeps its share.
+# - A ceiling: it runs in app-heavy.slice, capped at 16 GB with no swap; over that the kernel stops the job.
+# - GPU memory: on a machine whose GPU shares system memory, allocations through the GPU driver are not counted against
+#   the slice. JAX takes 75% of GPU memory up front by default, which once froze a desktop, so JAX allocates as it
+#   goes and never takes more than 20%; PyTorch frees what it no longer uses.
+# Output goes to the journal unless COMMAND redirects it.
+set -e
+name=$1; shift
+exec systemd-run --user --quiet --collect --unit="$name" --slice=app-heavy.slice --working-directory="$PWD" \
+  --setenv=PATH="$PATH" --setenv=XLA_PYTHON_CLIENT_PREALLOCATE=false --setenv=XLA_PYTHON_CLIENT_MEM_FRACTION=0.2 \
+  --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  flock "$HOME/.cache/heavy.lock" sh -c '
+    # Hand back the file cache earlier jobs left charged to the slice, which its MemoryLow would otherwise shield.
+    slice=/sys/fs/cgroup$(dirname "$(cut -d: -f3 /proc/self/cgroup)")
+    echo "$(cat "$slice/memory.current")" > "$slice/memory.reclaim" 2>/dev/null || true
+    while [ "$(awk "/MemAvailable/ {print int(\$2 / 1048576)}" /proc/meminfo)" -lt 16 ]; do sleep 10; done
+    exec "$@"' heavy "$@"

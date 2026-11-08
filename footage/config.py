@@ -6,13 +6,13 @@ The file is `~/.config/azimuth-video/config.json`, or the path in AZIMUTH_VIDEO_
       "context": "One sentence about what the footage shows, given to the describer.",
       "describer": "agent or model name",
       "timezone": "Area/City",
-      "look": "cinema",
+      "look": "cinema-glow",
       "cameras": [{"model_prefix": "Canon EOS", "squeeze": 1.6, "log": "Canon Log 3", "gamut": "Cinema Gamut"}]
     }
 
 `describer` names who answers the description questions (see describe.py). Without a timezone, shooting days follow
 the system's local time. `look` is the house look (a file in looks/) that every render and still uses unless a timeline
-or --look names another; without it, cinema. Without a camera rule, a clip's squeeze is unknown until you set it with
+or --look names another; without it, cinema-glow. Without a camera rule, a clip's squeeze is unknown until you set it with
 python -m footage.assume.
 """
 import json
