@@ -1,4 +1,4 @@
-"""Render Library clips through the grade: an OTIO timeline to a 2.39:1 master, or single stills, by one filter graph.
+"""Render Library clips through the grade: an OTIO timeline to a 2.39:1 master, or single stills, by one picture graph.
 
 The timeline is the whole edit: video track 1 is picture, every audio track is mixed under it. The edit fades in from
 black and out to black over `metadata["footage"]["fades"]` seconds ([in, out], default [0.8, 1.0]; 0 is a cut). The
@@ -33,6 +33,9 @@ FADE_IN, FADE_OUT = 0.8, 1.0
 READS = ("measured", "focus")  # the grade reads measured; a focus pull's retime reads focus, which a still never shows
 # ffmpeg-gpu (BtbN build) has 10-bit x265; Arch ARM's x265 is 8-bit only, and ffmpeg silently falls back to 8-bit.
 FFMPEG = "ffmpeg-gpu"
+ENCODE = ["-c:v", "libx265", "-preset", "medium", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1",
+          "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error",
+          "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
 
 
 def read(clip: Path, needs: tuple = READS) -> dict:
@@ -131,49 +134,50 @@ def render(edit: Path, name: str | None = None) -> Path:
         raise SystemExit("a full-frame render needs clips of one shape")
     size = (round(h * (view.full_width(filmed[0]) if full else view.ASPECT) / 2) * 2, h)
     rate = filmed[0]["facts"]["fps"]
-    cmd, graph, inputs = [FFMPEG, "-v", "error", "-stats", "-y"], [], 0
+    # Each shot is graded and encoded on its own, then the shots are joined without re-encoding: one graph holding
+    # every shot's 5K decoder and frames at once reached 15 GB on 24 shots and made no frame in 5 hours.
+    pieces = out.with_name(f"{out.stem}.shots")
+    pieces.mkdir(exist_ok=True)
+    print(f"  {len(pictures)} shots at {size[0]}x{size[1]} in {look.name}", flush=True)
     with tempfile.TemporaryDirectory() as tmp:
-        for i, ((clip, start, dur, _, item), sc) in enumerate(pictures):
+        for i, ((clip, start, dur, at, item), sc) in enumerate(pictures):
             n = round(dur.to_frames())
             if sc is None:
-                graph.append(title(item, size, rate, n, f"v{i}"))
-                continue
-            # Sixteen decoder threads shared by the inputs, at least two each: sixteen 4K inputs at the default thread
-            # count would hold many GB of frames.
-            cmd += ["-threads", str(max(2, 16 // len(filmed))), "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", view.source(clip, sc)]
-            eased = retime(sc, start, dur.to_seconds()) or ""
-            if eased:
-                print(f"  {clip.stem}: retimed focus pull", flush=True)
-            frame = framing(sc, size, full)
-            graph.append(f"[{inputs}:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{frame},tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s{i}]")
-            graph += picture(f"s{i}", sc, size, Path(tmp), f"v{i}", look)
-            inputs += 1
-        # The camera's full-range flag must not reach the master: players expect standard (limited) range.
-        graph.append("".join(f"[v{i}]" for i in range(len(pictures))) + f"concat=n={len(pictures)}:v=1:a=0,"
-                     + (f"fade=t=in:d={fade_in}," if fade_in else "") + (f"fade=t=out:st={total - fade_out:.3f}:d={fade_out}," if fade_out else "") +
-                     f"scale=out_color_matrix=bt709:out_range=limited,format=yuv420p10le[v]")
-        mix = []
-        for track in timeline.audio_tracks():
-            for clip, start, dur, at, item in items(track):
-                cmd += ["-ss", f"{start:.3f}", "-t", f"{dur.to_seconds():.3f}", "-i", str(clip)]
-                d = dur.to_seconds()
-                graph.append(f"[{inputs}:a]loudnorm=I={item.metadata.get('footage', {}).get('lufs', -20)}:TP=-2,aresample=48000,"
-                             f"afade=t=in:d=0.08,afade=t=out:st={max(d - 0.08, 0):.3f}:d=0.08,"
-                             f"adelay={round(at * 1000)}:all=1[m{len(mix)}]")
-                mix.append(inputs)
-                inputs += 1
-        maps = ["-map", "[v]"]
-        if mix:
-            graph.append("".join(f"[m{k}]" for k in range(len(mix))) + f"amix=inputs={len(mix)}:normalize=0:duration=longest,"
-                         f"atrim=0:{total:.3f}" + (f",afade=t=out:st={total - fade_out:.3f}:d={fade_out}" if fade_out else "") + "[a]")
-            maps += ["-map", "[a]", "-c:a", "aac", "-b:a", "256k"]
-        cmd += ["-filter_complex", ";".join(graph), *maps,
-                "-c:v", "libx265", "-preset", "medium", "-crf", str(settings.get("crf", 16)), "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1",
-                "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error",
-                "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
-                "-write_tmcd", "0", "-movflags", "+faststart", str(part)]
-        print(f"  {len(pictures)} shots at {size[0]}x{size[1]} in {look.name}", flush=True)
-        subprocess.run(cmd, check=True)
+                cmd, graph = [], [title(item, size, rate, n, "v")]
+            else:
+                cmd = ["-threads", "8", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", view.source(clip, sc)]
+                eased = retime(sc, start, dur.to_seconds()) or ""
+                if eased:
+                    print(f"  {clip.stem}: retimed focus pull", flush=True)
+                graph = [f"[0:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{framing(sc, size, full)},"
+                         f"tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s]"] + picture("s", sc, size, Path(tmp), "v", look)
+            # The edit's fades are placed in edit time, so a shot is moved to its place in the edit for them.
+            graph.append(f"[v]setpts=PTS-STARTPTS+{at:.6f}/TB," + (f"fade=t=in:d={fade_in}," if fade_in else "")
+                         + (f"fade=t=out:st={total - fade_out:.3f}:d={fade_out}," if fade_out else "")
+                         # The camera's full-range flag must not reach the master: players expect standard (limited) range.
+                         + "setpts=PTS-STARTPTS,scale=out_color_matrix=bt709:out_range=limited,format=yuv420p10le[o]")
+            print(f"  shot {i + 1}/{len(pictures)}: {clip.stem if clip else 'title'}", flush=True)
+            subprocess.run([FFMPEG, "-v", "error", "-stats", "-y", *cmd, "-filter_complex", ";".join(graph), "-map", "[o]",
+                            "-frames:v", str(n), "-r", rate, *ENCODE, "-crf", str(settings.get("crf", 16)), str(pieces / f"{i:03}.mp4")], check=True)
+    (pieces / "list.txt").write_text("".join(f"file '{i:03}.mp4'\n" for i in range(len(pictures))))
+    cmd, graph, mix = [FFMPEG, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(pieces / "list.txt")], [], []
+    for track in timeline.audio_tracks():
+        for clip, start, dur, at, item in items(track):
+            cmd += ["-ss", f"{start:.3f}", "-t", f"{dur.to_seconds():.3f}", "-i", str(clip)]
+            d = dur.to_seconds()
+            graph.append(f"[{len(mix) + 1}:a]loudnorm=I={item.metadata.get('footage', {}).get('lufs', -20)}:TP=-2,aresample=48000,"
+                         f"afade=t=in:d=0.08,afade=t=out:st={max(d - 0.08, 0):.3f}:d=0.08,"
+                         f"adelay={round(at * 1000)}:all=1[m{len(mix)}]")
+            mix.append(len(mix) + 1)
+    maps = ["-map", "0:v", "-c:v", "copy", "-tag:v", "hvc1"]
+    if mix:
+        graph.append("".join(f"[m{k}]" for k in range(len(mix))) + f"amix=inputs={len(mix)}:normalize=0:duration=longest,"
+                     f"atrim=0:{total:.3f}" + (f",afade=t=out:st={total - fade_out:.3f}:d={fade_out}" if fade_out else "") + "[a]")
+        maps = ["-filter_complex", ";".join(graph), *maps, "-map", "[a]", "-c:a", "aac", "-b:a", "256k"]
+    subprocess.run([*cmd, *maps, "-write_tmcd", "0", "-movflags", "+faststart", str(part)], check=True)
+    for f in pieces.iterdir():
+        f.unlink()
+    pieces.rmdir()
     part.rename(out)  # a render that stops leaves its part, never a short master under the master's name
     return out
 

@@ -41,13 +41,14 @@ it stops, and search leaves it out and says how many clips it skipped sections o
      its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
      walls), and lens vignette;
    - the looks are files in `looks/`: `cinema` (the default house look), `cinema-glow`, `classic`, `cinestill-800t`,
-     `kodak-gold-200`, `portra-400`, `fuji-pro-400h` and `fuji-superia-400`, with stronger versions of CineStill and Gold.
+     `kodak-gold-200`, `portra-400`, `fuji-pro-400h`, `fuji-superia-400` and `scifi`, with stronger versions of CineStill and Gold.
      `python -m footage.grade` lists them;
    - `natural` is the true-to-life grade: no film, glow or vignette. Each shot's shade is balanced apart from its
      lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a dark shot is shown as exposed (for its lit part, a doorway at night), darker, with colour fading out of its shadows as it does for the eye at night.
      The highlights are kept under the shoulder (the look's `key`, `dark`, `night`, `headroom`, `shadows` and `tint` settings).
 
-   The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
+   Each shot is graded and encoded on its own and the shots are joined without re-encoding, so a long edit needs
+   no more memory than its largest shot. The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
    A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
    documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
 
