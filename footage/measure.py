@@ -78,9 +78,11 @@ def measure(clip: Path, sc: dict) -> dict:
     seen = None
     if largest:
         med = lambda k: round(float(np.median([x[k] for x in largest])), 2)
-        fp = np.median([x["print"] for x in largest], axis=0)
+        known = [x["print"] for x in largest if x["print"]]
+        fp = np.median(known, axis=0) if known else None
         seen = {"in_frames": len(largest), "of": n, "height": med("height"), "key_stops": med("key_stops"),
-                "fill_stops": med("fill_stops"), "print": [round(float(v), 3) for v in fp / np.linalg.norm(fp)]}
+                "fill_stops": med("fill_stops"),
+                "print": None if fp is None else [round(float(v), 3) for v in fp / np.linalg.norm(fp)]}
     return {
         "frames_at": times,
         "exposure_stops": round(float(np.log2(np.exp(np.log(y).mean()) / 0.18)), 2),

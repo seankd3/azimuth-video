@@ -44,7 +44,7 @@ def unit(v) -> np.ndarray:
 def tracks(measured: dict) -> list[dict]:
     """The distinct faces in one clip: its detections grouped by fingerprint."""
     out = []
-    for d in sorted(measured.get("faces", []), key=lambda d: -d["height"]):
+    for d in sorted((d for d in measured.get("faces", []) if d["print"]), key=lambda d: -d["height"]):
         p = unit(d["print"])
         best = max(out, key=lambda t: float(t["print"] @ p), default=None)
         if best is not None and float(best["print"] @ p) >= face.SAME:
@@ -237,7 +237,7 @@ def of(clip: Path, sc: dict) -> dict | None:
     """The clip's subject (the largest face measured), if they are one of the people the last build found in this clip:
     id, name and skin level."""
     subject = sc.get("measured", {}).get("face")
-    if not subject:
+    if not subject or not subject["print"]:
         return None
     s = unit(subject["print"])
     here = [p for p in known(clip.parent.parent / "people.json") if p.get("print") and library.name_of(clip) in p["clips"]]

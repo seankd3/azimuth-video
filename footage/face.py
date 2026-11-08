@@ -11,12 +11,15 @@ import numpy as np
 
 from . import color, models
 
-VERSION = 3  # bump when detection, recognition or cheek measurement changes
+VERSION = 4  # bump when detection, recognition or cheek measurement changes
 DLIB = models.FOLDER / "dlib-faces"
 SMALLEST = 0.08  # faces shorter than this share of the frame are too small to measure or recognize
 # Cosine similarity of two fingerprints at which the faces are one person. On 60 tripod clips, 0.94 joined none of 71
 # pairs of faces sharing a frame and kept 89% of 122 same-place faces 1 s apart.
 SAME = 0.94
+# Detector confidence a face needs for a fingerprint. A face in profile scored 0.01 (a clear face 0.5 to 1.1), and its
+# fingerprint matched the person beside it at 0.98: such a face is measured for light but identifies nobody.
+SURE = 0.3
 ONE_AT_A_TIME = threading.Lock()  # the models are shared
 
 
@@ -56,13 +59,13 @@ def find(lin: np.ndarray, detail: np.ndarray) -> list[dict]:
     small, big = color.display(lin), color.display(detail)
     scale = big.shape[1] / w
     with ONE_AT_A_TIME:
-        boxes = [d.rect for d in detector()(small, 1) if d.rect.height() / h >= SMALLEST]
+        boxes = [(d.rect, d.confidence) for d in detector()(small, 1) if d.rect.height() / h >= SMALLEST]
         shape, recognize = recognizer()
         found = []
-        for b in boxes:
+        for b, sure in boxes:
             points = np.array([(p.x, p.y) for p in shape(small, b).parts()], float)
             box = dlib.rectangle(*(round(v * scale) for v in (b.left(), b.top(), b.right(), b.bottom())))
-            found.append((b, points, np.array(recognize.compute_face_descriptor(big, shape(big, box)))))
+            found.append((b, points, np.array(recognize.compute_face_descriptor(big, shape(big, box))) if sure >= SURE else None))
     out = []
     for b, points, fp in found:
         eyes, nose = (points[0:2].mean(axis=0), points[2:4].mean(axis=0)), points[4]
@@ -72,8 +75,7 @@ def find(lin: np.ndarray, detail: np.ndarray) -> list[dict]:
         if any(s is None for s in sides) or min(color.luminance(s) for s in sides) <= 0:
             continue
         lit, shade = sorted(sides, key=color.luminance, reverse=True)
-        fp = fp / np.linalg.norm(fp)
         out.append({"height": round(float(b.height() / h), 3), "key_stops": round(float(np.log2(color.luminance(lit) / 0.18)), 2),
                     "fill_stops": round(float(np.log2(color.luminance(shade) / 0.18)), 2),
-                    "cheek_rgb": [round(float(v), 4) for v in lit], "print": [round(float(v), 3) for v in fp]})
+                    "cheek_rgb": [round(float(v), 4) for v in lit], "print": None if fp is None else [round(float(v), 3) for v in fp / np.linalg.norm(fp)]})
     return sorted(out, key=lambda x: -x["height"])
