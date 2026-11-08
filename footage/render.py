@@ -30,19 +30,19 @@ import opentimelineio as otio
 from . import grade, idle, library, passes, people, sidecar, smooth, view
 
 FADE_IN, FADE_OUT = 0.8, 1.0
-READS = ("measured", "focus")  # the grade reads measured; a focus pull's retime reads focus
+READS = ("measured", "focus")  # the grade reads measured; a focus pull's retime reads focus, which a still never shows
 # ffmpeg-gpu (BtbN build) has 10-bit x265; Arch ARM's x265 is 8-bit only, and ffmpeg silently falls back to 8-bit.
 FFMPEG = "ffmpeg-gpu"
 
 
-def read(clip: Path) -> dict:
+def read(clip: Path, needs: tuple = READS) -> dict:
     """A clip's sidecar with its person (people.of). A render from anything out of date would not be the approved
     picture, so it stops instead."""
     sc = sidecar.read(clip)
     if sc is None:
         raise SystemExit(f"{clip.name} has no sidecar: run python -m footage first")
     sc = passes.fresh(clip, sc)[0]
-    missing = [s for s in READS if s not in sc]
+    missing = [s for s in needs if s not in sc]
     if missing:
         raise SystemExit(f"{clip.name}: {', '.join(missing)} missing or out of date: run python -m footage first")
     return {**sc, "person": people.of(clip, sc)}
@@ -180,7 +180,7 @@ def render(edit: Path, name: str | None = None) -> Path:
 
 def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     """One graded frame at the master's full size, as a maximum-quality JPEG."""
-    sc = read(clip)
+    sc = read(clip, ("measured",))
     if not 0 <= t < sc["facts"]["duration"]:  # past the end ffmpeg writes nothing, or waits forever on the vignette
         raise SystemExit(f"{clip.name} is {sc['facts']['duration']:.1f} s long: no frame at {t:g} s")
     with tempfile.TemporaryDirectory() as tmp:
