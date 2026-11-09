@@ -17,21 +17,24 @@ class Pass:
     section: str
     run: Callable[[Path, dict], dict | None]  # None: nothing to store yet
     identity: Callable[[dict], dict]
-    workers: int
+    workers: int  # most clips at once, whatever the memory
+    gb: float  # peak GB one clip's run takes, measured: __main__ runs fewer at once when memory is short
 
 
 PASSES = [
     # Writes questions, and takes the answers its describer left; see describe.py.
-    Pass("description", describe.describe, describe.identity, 2),
-    Pass("transcript", transcribe.clip, transcribe.identity, 1),
-    Pass("measured", measure.measure, measure.identity, 4),
+    Pass("description", describe.describe, describe.identity, 2, 1),
+    Pass("transcript", transcribe.clip, transcribe.identity, 1, 4),
+    # Peaked at 3.6 GB on a 397 s clip (2026-11-09): four at once is the run's largest combined footprint.
+    Pass("measured", measure.measure, measure.identity, 4, 4),
     # Reads every frame on the GPU decoder, one clip at a time: its frame buffers count as system memory on a
-    # shared-memory GPU, and two clips at once reached 15 GB.
-    Pass("focus", focus.focus, focus.identity, 1),
-    # One clip at a time: the model holds the GPU, and each clip's frames are cut 8 at once.
-    Pass("embedding", embed.embed, embed.identity, 1),
+    # shared-memory GPU, and two clips at once reached 15 GB. One clip alone peaked at 0.43 GB of RSS (2026-11-09);
+    # the rest is the decoder's, which is why gb counts it at 4.
+    Pass("focus", focus.focus, focus.identity, 1, 4),
+    # One clip at a time: the model holds the GPU. Peaked at 6.3 GB streamed on a 397 s clip (2026-11-09).
+    Pass("embedding", embed.embed, embed.identity, 1, 7),
     # Three frames' features, for telling which clips are takes of one angle (takes.py).
-    Pass("angle", takes.angle, takes.identity, 2),
+    Pass("angle", takes.angle, takes.identity, 2, 1),
 ]
 OWNER = {p.section: p for p in PASSES}
 

@@ -63,16 +63,27 @@ def embed(clip: Path, sc: dict) -> dict:
     spans = windows(d)
     # The middle of each second, but never in the last two frames: a seek there can find no frame to decode.
     last = d - 2 / float(Fraction(sc["facts"]["fps"]))
-    seconds = [min((k + min(k + 1, d)) / 2, last) for k in range(math.ceil(d))]
-    with ThreadPoolExecutor(8) as pool:
-        frames = list(pool.map(lambda t: np.asarray(Image.open(BytesIO(jpeg(clip, sc, t, WIDTH))).convert("RGB")), seconds))
-    # The frames are already one a second, so the processor keeps them all.
-    picture = model().encode([{"text": "<|video|>", "video": np.stack(frames[int(a):math.ceil(b)])} for a, b in spans],
-                             normalize_embeddings=True, processing_kwargs={"video": {"do_sample_frames": False}},
-                             batch_size=BATCH)
+    at = lambda k: min((k + min(k + 1, d)) / 2, last)
     sound = audio(clip)
-    heard = model().encode([{"text": "<|audio|>", "audio": sound[int(a * RATE):int(b * RATE)]} for a, b in spans],
-                           normalize_embeddings=True, batch_size=BATCH) if len(sound) else None
+    # One batch of windows in memory at a time: the frames of BATCH windows, read, encoded and dropped before the
+    # next batch is read, so a clip's cost no longer grows with its length (a 397 s clip held every frame at once
+    # and peaked at 7.4 GB; the batches the model sees are unchanged, so the vectors are too).
+    picture, heard = [], []
+    with ThreadPoolExecutor(8) as pool:
+        for i in range(0, len(spans), BATCH):
+            part = spans[i:i + BATCH]
+            frames = list(pool.map(lambda t: np.asarray(Image.open(BytesIO(jpeg(clip, sc, t, WIDTH))).convert("RGB")),
+                                   [at(k) for k in range(int(part[0][0]), math.ceil(part[-1][1]))]))
+            base = int(part[0][0])
+            # The frames are already one a second, so the processor keeps them all.
+            picture += list(model().encode(
+                [{"text": "<|video|>", "video": np.stack(frames[int(a) - base:math.ceil(b) - base])} for a, b in part],
+                normalize_embeddings=True, processing_kwargs={"video": {"do_sample_frames": False}}, batch_size=BATCH))
+            if len(sound):
+                heard += list(model().encode(
+                    [{"text": "<|audio|>", "audio": sound[int(a * RATE):int(b * RATE)]} for a, b in part],
+                    normalize_embeddings=True, batch_size=BATCH))
+    heard = heard or None
     import torch
     torch.cuda.empty_cache()  # the GPU shares the machine's memory: hand back what this clip used
     return {"window": WINDOW, "picture": rows(picture), "sound": rows(heard) if heard is not None else None}

@@ -5,6 +5,7 @@ retried next run.
 """
 import argparse
 import fcntl
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -33,7 +34,12 @@ def fill(lib: Path, p: Pass, report: list) -> None:
         return clip, p.identity(sc), p.run(clip, sc)
 
     waiting = 0
-    with ThreadPoolExecutor(p.workers) as pool:
+    # Memory decides how many of the pass's workers run: the FOOTAGE_MEM_GB budget when set, else three quarters of
+    # what the machine has free, so a run on a smaller machine slows down instead of being killed. At least one
+    # worker always runs: a single clip over budget still gets its section, or fails on its own and is retried.
+    free = float(os.environ.get("FOOTAGE_MEM_GB") or next(
+        (int(l.split()[1]) for l in open("/proc/meminfo") if l.startswith("MemAvailable")), 0) / 2**20 * 0.75)
+    with ThreadPoolExecutor(max(1, min(p.workers, int(free // p.gb)))) as pool:
         jobs = [pool.submit(job, clip) for clip in todo]
         for i, done in enumerate(as_completed(jobs), 1):
             try:
