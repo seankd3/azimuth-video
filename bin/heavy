@@ -55,7 +55,7 @@ flock 9
 until fits; do sleep 10; done
 systemd-run --user --quiet --collect --wait --pipe --unit="$name" --slice=app-heavy.slice --working-directory="$PWD" "${env[@]}" \
   --setenv=HEAVY_GB="$gb" --setenv=XLA_PYTHON_CLIENT_PREALLOCATE=false --setenv=XLA_PYTHON_CLIENT_MEM_FRACTION=0.2 \
-  --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "$@" 9>&- &
+  --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "$@" <&0 9>&- &
 run=$!
 trap 'systemctl --user stop "$name"' INT TERM
 until systemctl --user is-active --quiet "$name" || ! kill -0 "$run" 2>/dev/null; do sleep 0.2; done
