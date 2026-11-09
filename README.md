@@ -31,6 +31,10 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 6. **Find focus pulls and movement.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
    Second by second, it also tells the camera's own movement apart from what moves in front of it, so `find --moving`
    lists only stretches where something moves before a still camera, not a shaking one or the bump of the record button.
+   The same pass records how sharp and how bright each second is. From those facts `find` computes, on read, each
+   clip's **usable ranges** (sharp against the clip's own median, camera held rather than shaking, not black) and its
+   **cut points**: a pull about to start or just settled, a pause in speech, the edge of a moving stretch, a lull in
+   the motion, each scored. An edit cuts inside usable ranges, on cut points.
 7. **Recognize people.** It groups faces into people across the whole library, and knows people's voices once you
    name them in a transcript. You can add names to `people.json`.
 8. **Index.** EmbeddingGemma 2 turns every 5 seconds of a clip into two vectors, one for the picture and one for the

@@ -25,7 +25,7 @@ from scipy.ndimage import median_filter, uniform_filter1d
 
 from . import view
 
-VERSION = 6
+VERSION = 7
 W, GX, GY = 640, 8, 4  # frames are read W pixels wide (smooth.py measures its retimes the same way)
 NET_MIN = 0.45  # mean change in log sharpness per second across regions
 COHERENT = 0.6  # net change over a second / the path it took: one way, not back and forth
@@ -163,7 +163,10 @@ def focus(clip: Path, sc: dict) -> dict:
         p["smooth"] = smooth.best(clip, sc, sharp, *p["frames"]) if still else None
     per = max(1, round(fps))
     second = lambda v: [round(float(v[i:i + per].mean()), 2) for i in range(1, len(v), per)]
-    return {"pulls": found, "motion": second(change), "camera": second(pans)}
+    # Per second beside motion and camera: how sharp the frame is (mean log sharpness over the regions) and how
+    # bright it is (mean grey level). Computed on read, usable() and cutpoints() score every second from these.
+    return {"pulls": found, "motion": second(change), "camera": second(pans),
+            "sharp": second(sharp.mean(1)) if len(sharp) else [], "light": second(thumbs.mean((1, 2))) if len(thumbs) else []}
 
 
 MOVING = 0.35  # thumbnail change per frame (grey levels) at which something in a locked-off shot is moving: a still
@@ -171,6 +174,65 @@ MOVING = 0.35  # thumbnail change per frame (grey levels) at which something in 
 MOVING_SECONDS = 2  # shortest moving stretch worth listing
 STEADY = 0.08  # camera movement (pixels per frame, W wide) up to which the camera is held still: a tripod reads 0.01
 #              to 0.05, and the steadiest hand 0.1
+
+
+SHARP_DROP = 0.6  # log sharpness below the clip's own median at which a second reads defocused: a pull worth
+#                 cutting on changes 1.2 or more (PULL_MIN), so half that is a frame on its way out of focus
+HELD_MAX = 0.5  # camera movement above the steadiest hand (0.1 to 0.5 reads held, 0.5 to 2 shaky)
+DARK = 4.0  # mean grey level below which a second is black: lens cap, covered lens, fade floor
+USABLE_SECONDS = 2  # shortest usable stretch worth offering an edit, as with MOVING_SECONDS
+
+
+def usable(sc: dict) -> list[tuple[int, float]]:
+    """Stretches of at least USABLE_SECONDS whole seconds an edit can cut inside: sharp against the clip's own
+    median, the camera held rather than shaking, and not black. One bad second inside a run is bridged; the last
+    stretch may end mid-second. Computed from the focus facts, never stored."""
+    f, end = sc.get("focus", {}), sc["facts"]["duration"]
+    sharp, camera, light = f.get("sharp", []), f.get("camera", []), f.get("light", [])
+    if not sharp:
+        return []
+    floor = float(np.median(sharp)) - SHARP_DROP
+    ok = [sharp[s] >= floor and (s >= len(camera) or camera[s] <= HELD_MAX) and (s >= len(light) or light[s] >= DARK)
+          for s in range(len(sharp))]
+    runs, start, last_good = [], None, None
+    for s, good in enumerate(ok + [False]):
+        if good:
+            start, last_good = (s if start is None else start), s
+        elif start is not None and s - last_good > 1:  # second bad second in a row ends the run at its last good one
+            if min(last_good + 1, end) - start >= USABLE_SECONDS:
+                runs.append((start, round(min(last_good + 1, end), 2)))
+            start, last_good = None, None
+    if start is not None and min(last_good + 1, end) - start >= USABLE_SECONDS:
+        runs.append((start, round(min(last_good + 1, end), 2)))
+    return runs
+
+
+def cutpoints(sc: dict) -> list[dict]:
+    """Frames an edit can cut on, each with why and a score: a pull about to start or just settled, a pause in
+    speech, the edge of a moving stretch, or a lull in the motion with the camera held. Computed from the focus
+    and transcript facts, never stored. Points within a quarter second keep the better score."""
+    f, out = sc.get("focus", {}), []
+    for p in f.get("pulls", []):
+        out += [{"t": p["start"], "score": 0.9, "why": "pull starts"}, {"t": p["end"], "score": 0.9, "why": "pull settled"}]
+    words = sc.get("transcript", {}).get("words", [])
+    for a, b in zip(words, words[1:]):
+        if b["start"] - a["end"] >= 0.6:
+            out.append({"t": round((a["end"] + b["start"]) / 2, 2), "score": 0.8, "why": "speech pause"})
+    for a, b in moving(sc):
+        out += [{"t": float(a), "score": 0.7, "why": "movement starts"}, {"t": float(b), "score": 0.7, "why": "movement ends"}]
+    motion, camera, last_lull = f.get("motion", []), f.get("camera", []), -2
+    for s in range(1, len(motion) - 1):
+        if (motion[s] < motion[s - 1] and motion[s] <= motion[s + 1] and s - last_lull >= 2
+                and s < len(camera) and camera[s] <= HELD_MAX):
+            out.append({"t": float(s), "score": 0.5, "why": "motion lull"})
+            last_lull = s
+    kept = []
+    for c in sorted(out, key=lambda c: c["t"]):
+        if kept and c["t"] - kept[-1]["t"] < 0.25:
+            kept[-1] = max(kept[-1], c, key=lambda c: c["score"])
+        else:
+            kept.append(c)
+    return kept
 
 
 def moving(sc: dict) -> list[tuple[int, float]]:

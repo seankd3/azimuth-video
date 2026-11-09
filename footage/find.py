@@ -42,7 +42,8 @@ def record(clip: Path, sc: dict) -> dict:
     return {"clip": str(clip), "name": f"{clip.parent.name}/{clip.stem}", "seconds": round(sc["facts"]["duration"], 1),
             "size": d.get("shot_size"), "summary": d.get("summary"), "tags": d.get("tags", []),
             "person": sc.get("person"), "voices": sc.get("voices", {}),
-            "moving": focus.moving(sc), "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
+            "moving": focus.moving(sc), "usable": focus.usable(sc), "cutpoints": focus.cutpoints(sc),
+            "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
             "speech": [(t["start"], t["end"], t["text"]) for t in turns(sc.get("transcript", {}).get("words", []))]}
 
 
@@ -56,7 +57,8 @@ def matches(sc: dict, a, wanted: set) -> bool:
 
 
 def line(r: dict) -> str:
-    where = ([f"moving {', '.join(f'{a}-{b:g}s' for a, b in r['moving'])}"] if r["moving"] else []) + \
+    where = ([f"usable {', '.join(f'{a}-{b:g}s' for a, b in r['usable'])}"] if r["usable"] else []) + \
+            ([f"moving {', '.join(f'{a}-{b:g}s' for a, b in r['moving'])}"] if r["moving"] else []) + \
             ([f"pulls {', '.join(f'{a:.1f}-{b:.1f}s' for a, b, _ in r['pulls'])}"] if r["pulls"] else []) + \
             ([f"speech {len(r['speech'])}"] if r["speech"] else [])
     who = (r["person"] or {}).get("name") or (r["person"] or {}).get("id") or ""
