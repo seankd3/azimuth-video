@@ -106,9 +106,9 @@ date when run again. It needs uv, curl, a C++ compiler, make and the CUDA toolki
   and NVIDIA's TitaNet-large, exported to ONNX on your machine with NVIDIA NeMo (`setup/titanet.py`). The folder is
   read-only: a section is identified by its models' file names and sizes, so a new model or version goes in under a
   new name, never over an old file.
-- `footage TOOL ARGS` in `~/.local/bin`, the same as `python -m footage.TOOL` in the environment, and `heavy NAME
-  COMMAND`, which runs a long job as a systemd user unit, one at a time, under a 16 GB memory ceiling
-  (`setup/app-heavy.slice`), so the desktop stays responsive.
+- `footage TOOL ARGS` in `~/.local/bin`, the same as `python -m footage.TOOL` in the environment, and `heavy [-l LANE] [-w]
+  NAME COMMAND`, which runs a long job as a systemd user unit in a queue: it starts when its lane's peak fits under
+  the memory ceiling of `setup/app-heavy.slice` beside the jobs already running, so the desktop stays responsive.
 - The skills in `skills/`, linked into Claude Code and Codex: `azimuth-video` teaches an agent to offload a card, find
   shots, describe clips and cut, grade and render edits in code; `transcribe` turns any recording into a transcript
   with speaker labels. With them, you work by asking the agent ("offload the card and cut the shots where the robots move").
