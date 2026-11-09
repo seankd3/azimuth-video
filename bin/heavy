@@ -42,17 +42,18 @@ fits() {
   high=$(systemctl --user show -P MemoryHigh app-heavy.slice)
   # A slice with no job running has no cgroup, and then it holds nothing.
   slice=$(systemctl --user show -P ControlGroup app-heavy.slice)
-  [ -n "$slice" ] || { [ $(( $(awk '/MemAvailable/ {print $2}' /proc/meminfo) * 1024 )) -ge $((need + 4 * G)) ]; return; }
-  slice=/sys/fs/cgroup$slice
-  for unit in "$slice"/*.service "$slice"/*.scope; do
-    [ -e "$unit/memory.current" ] || continue
-    cur=$(cat "$unit/memory.current"); peak=$(systemctl --user show -P Environment "${unit##*/}" | grep -o 'HEAVY_GB=[0-9]*' | cut -d= -f2)
-    peak=$(( ${peak:-0} * G )); used=$(( used + (cur > peak ? cur : peak) )); units=$((units + 1))
-  done
-  # The file cache that ended jobs left charged to the slice counts against its MemoryHigh and its MemoryLow shields
-  # it, so it goes back first.
-  cur=$(cat "$slice/memory.current" 2>/dev/null || echo 0)
-  [ $((cur - used)) -le 0 ] || echo $((cur - used)) > "$slice/memory.reclaim" 2>/dev/null || true
+  if [ -n "$slice" ]; then
+    slice=/sys/fs/cgroup$slice
+    for unit in "$slice"/*.service "$slice"/*.scope; do
+      [ -e "$unit/memory.current" ] || continue
+      cur=$(cat "$unit/memory.current"); peak=$(systemctl --user show -P Environment "${unit##*/}" | grep -o 'HEAVY_GB=[0-9]*' | cut -d= -f2)
+      peak=$(( ${peak:-0} * G )); used=$(( used + (cur > peak ? cur : peak) )); units=$((units + 1))
+    done
+    # The file cache that ended jobs left charged to the slice counts against its MemoryHigh and its MemoryLow shields
+    # it, so it goes back first.
+    cur=$(cat "$slice/memory.current" 2>/dev/null || echo 0)
+    [ $((cur - used)) -le 0 ] || echo $((cur - used)) > "$slice/memory.reclaim" 2>/dev/null || true
+  fi
   [ $(( $(awk '/MemAvailable/ {print $2}' /proc/meminfo) * 1024 )) -ge $((need + 4 * G)) ] || return 1
   [ "$units" = 0 ] || [ "$high" = infinity ] || [ $((used + need)) -le "$high" ]
 }
