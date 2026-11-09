@@ -14,8 +14,9 @@
 #
 # A lane is a kind of job and the memory its runs peak at, in GB.
 lanes='
-media 12 a library run, a render or a model job: a library run peaked near 12 GB
-dev   5  a test suite, a build, a type check or a review: 1,035 such runs on one machine peaked at 4.9 GB (p99)
+media  12 a library run, a render or a model job: a library run peaked near 12 GB
+dev    5  a test suite, a build or a type check: 1,035 such runs on one machine peaked at 4.9 GB (p99)
+review 2  a code review by a model: 96 such runs on one machine peaked at 1.9 GB (max)
 '
 set -eu
 lane=media wait=
