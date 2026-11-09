@@ -1,4 +1,4 @@
-"""Render Library clips through the grade: an OTIO timeline to a 2.39:1 master, or single stills, by one picture graph.
+"""Render Library clips through the grade: an OTIO timeline to a 2.39:1 master, or single stills, by one picture path.
 
 The timeline is the whole edit: video track 1 is picture, every audio track is mixed under it. The edit fades in from
 black and out to black over `metadata["footage"]["fades"]` seconds ([in, out], default [0.8, 1.0]; 0 is a cut). The
@@ -7,11 +7,14 @@ is written beside the timeline as "EDIT - LOOK.mp4", so one edit can be rendered
 `metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21).
 The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
 A timeline may set `metadata["footage"]["frame"]` to "full" for the whole recorded frame, desqueezed,
-`["height"]` for a smaller master, and `["crf"]` (default 16) for a
-smaller file: a documentation copy is {"look": "natural", "frame": "full", "height": 1080, "crf": 28, "fades": [0, 0]}.
+`["height"]` for a smaller master, and `["crf"]` (the encoder's quantizer, default 18) for a
+smaller file: a documentation copy is {"look": "natural", "frame": "full", "height": 1080, "crf": 30, "fades": [0, 0]}.
 A clip whose media reference is a GeneratorReference of kind "title" is a title card: its `text` on black, fading in
 and out, with optional `size` (share of the frame height), `font` (a fontconfig name) and `fade` (seconds).
-Stills go through exactly the same picture graph, so an approved still is what the video will show.
+
+Every frame goes through picture.py on the GPU, shot after shot, into one encoder: the GPU's HEVC encoder, reached
+through Vulkan video (the NVENC interface refuses this driver). So a render holds a few frames at a time however long
+the edit is. Stills go through exactly the same picture path, so an approved still is what the video will show.
 A focus pull in a still shot is retimed so the focus eases in and out evenly over the same duration (smooth.py);
 blended frames look like in-between focus. Cut points don't move. Shots are shown as shot: nothing is stabilized.
 
@@ -19,23 +22,20 @@ python -m footage.render EDIT.otio [--look NAME,NAME...]
 python -m footage.render --stills OUT_DIR [--look NAME,NAME...] CLIP@SECONDS ...
 """
 import argparse
+import queue
 import subprocess
+import threading
 from fractions import Fraction
-import tempfile
 from pathlib import Path
 
-import numpy as np
 import opentimelineio as otio
 
-from . import grade, idle, library, passes, people, sidecar, smooth, view
+from . import develop, grade, idle, library, passes, people, picture, sidecar, smooth, view
 
 FADE_IN, FADE_OUT = 0.8, 1.0
+QP = 18  # the encoder's constant quantizer: 18 is visually lossless on graded 5K footage
 READS = ("measured", "focus")  # the grade reads measured; a focus pull's retime reads focus, which a still never shows
-# ffmpeg-gpu (BtbN build) has 10-bit x265; Arch ARM's x265 is 8-bit only, and ffmpeg silently falls back to 8-bit.
-FFMPEG = "ffmpeg-gpu"
-ENCODE = ["-c:v", "libx265", "-preset", "medium", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1",
-          "-x265-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:log-level=error",
-          "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
+FFMPEG = "ffmpeg-gpu"  # a BtbN build: NVDEC, Vulkan video and 10-bit HEVC
 
 
 def read(clip: Path, needs: tuple = READS) -> dict:
@@ -61,25 +61,18 @@ def items(track: otio.schema.Track):
             yield path, item.source_range.start_time.to_seconds(), item.source_range.duration, at, item
 
 
-def title(clip: otio.schema.Clip, size: tuple[int, int], rate: str, frames: int, tag: str) -> str:
-    """A title card: white text centred on black, fading in and out, as 16-bit RGB at [tag]."""
+def title(clip: otio.schema.Clip, size: tuple[int, int], rate: str, frames: int) -> list[str]:
+    """A title card: white text centred on black, fading in and out: an ffmpeg command writing it as 16-bit RGB."""
     p = clip.media_reference.parameters
     w, h = size
     d, fade = frames / float(Fraction(rate)), float(p.get("fade", 1.0))
     font = subprocess.run(["fc-match", "-f", "%{file}", p.get("font", "Sans")], capture_output=True, text=True).stdout
     text = str(p["text"]).replace("\\", "\\\\").replace("'", "\u2019").replace(":", "\\:")
     alpha = f"if(lt(t,{fade}),t/{fade},if(gt(t,{d - fade:.3f}),({d:.3f}-t)/{fade},1))"
-    return (f"color=c=black:s={w}x{h}:r={rate}:d={d + 1:.3f},format=yuv444p,"
+    graph = (f"color=c=black:s={w}x{h}:r={rate}:d={d + 1:.3f},format=yuv444p,"
             f"drawtext=fontfile='{font}':text='{text}':fontcolor=white:fontsize={round(h * float(p.get('size', 0.045)))}:"
-            f"x=(w-text_w)/2:y=(h-text_h)/2:alpha='{alpha}',trim=end_frame={frames},format=gbrp16le[{tag}]")
-
-
-def framing(sc: dict, size: tuple[int, int], full: bool = False) -> str:
-    """Filters from camera frames to the desqueezed picture at size, as 16-bit RGB: the 2.39:1 window, or the whole
-    frame."""
-    w, h = size
-    cw, ch = (sc["facts"]["width"], sc["facts"]["height"]) if full else view.window(sc)
-    return f"crop={cw}:{ch},scale={w}:{h}:flags=lanczos,setsar=1,format=gbrp16le"
+            f"x=(w-text_w)/2:y=(h-text_h)/2:alpha='{alpha}',trim=end_frame={frames},format=gbrp16le")
+    return [FFMPEG, "-v", "error", "-f", "lavfi", "-i", graph, "-frames:v", str(frames), "-f", "rawvideo", "-"]
 
 
 def retime(sc: dict, start: float, dur: float) -> str | None:
@@ -89,33 +82,43 @@ def retime(sc: dict, start: float, dur: float) -> str | None:
     return smooth.filters(points, start, dur, sc["facts"]["fps"]) if points else None
 
 
-def picture(src: str, sc: dict, size: tuple[int, int], tmp: Path, tag: str, look: grade.Look) -> list[str]:
-    """Filter chains taking the framed picture at [src] (framing()) to the graded 16-bit RGB picture at [tag]."""
+def decode(clip: Path, sc: dict, start: float, frames: int, eased: str = "", full: bool = False):
+    """A shot's frames in recorded pixels, framed (the 2.39:1 window, or the whole frame), as RGB code values on the
+    GPU (picture.frames). ffmpeg hands them over in the file's own YUV, unconverted. The GPU decodes a camera clip
+    (NVDEC); a developed RAW picture (8K 4:4:4) is decoded on the CPU."""
+    cw, ch = (sc["facts"]["width"], sc["facts"]["height"]) if full else view.window(sc)
+    fps = float(Fraction(sc["facts"]["fps"]))
+    fmt, full_range = ("yuv444p12le", True) if develop.raw(sc) else (sc["facts"]["pix_fmt"], sc["facts"]["color_range"] == "pc")
+    cmd = [FFMPEG, "-v", "error", *([] if develop.raw(sc) else ["-hwaccel", "cuda"]), "-threads", "8",
+           "-ss", f"{start:.3f}", "-t", f"{frames / fps + 1:.3f}", "-i", view.source(clip, sc),
+           "-vf", f"trim=end_frame={frames},setpts=PTS-STARTPTS,{eased}crop={cw}:{ch},"
+                  f"tpad=stop_mode=clone:stop=2,trim=end_frame={frames}",
+           "-pix_fmt", fmt, "-frames:v", str(frames), "-f", "rawvideo", "-"]
+    return picture.frames(cmd, (cw, ch), fmt, full_range)
+
+
+def encoder(timeline: otio.schema.Timeline, size: tuple[int, int], rate: str, total: float, fade_out: float,
+            qp: int, out: Path) -> subprocess.Popen:
+    """The one encoder of a render: 10-bit frames on stdin to HEVC on the GPU, with the timeline's sound mixed in."""
     w, h = size
-    lut = grade.write_luts(sc, tmp, tag, look)
-    decode, encode = tmp / "decode.cube", tmp / "encode.cube"
-    if not decode.exists():
-        grade.write_display(tmp)  # one look per render, so one display pair and one vignette
-    if look.vignette and not (tmp / "vignette.png").exists():
-        grade.write_vignette(tmp / "vignette.png", size, look, view.squeeze(sc))
-    printed = [f"[{src}]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}l]"]
-    if look.halation:
-        shaper, halo, glow = grade.write_halation(sc, tmp, tag, look)
-        spread = h * look.halation_spread / 4
-        # The glow is soft, so it is blurred at quarter size: a tight core and a wide skirt, then added as light.
-        printed = [
-            f"[{src}]split[{tag}p][{tag}s]",
-            f"[{tag}p]lut3d=file='{lut}':interp=tetrahedral,lut1d=file='{decode}'[{tag}c]",
-            f"[{tag}s]lut1d=file='{shaper}',lut3d=file='{halo}',scale={w // 4}:{h // 4}:flags=area,split[{tag}h1][{tag}h2]",
-            f"[{tag}h1]gblur=sigma={spread * 0.004:.2f}[{tag}t]",
-            f"[{tag}h2]gblur=sigma={spread * 0.014:.2f}[{tag}k]",
-            f"[{tag}t][{tag}k]mix=inputs=2:weights=0.6 0.4,lut1d=file='{glow}',scale={w}:{h}:flags=bicubic[{tag}g]",
-            f"[{tag}c][{tag}g]blend=all_mode=addition[{tag}l]",
-        ]
-    return printed + ([  # the vignette multiplies display light by a 16-bit mask (ffmpeg's vignette filter is 8-bit only)
-        f"movie='{tmp / 'vignette.png'}',format=gbrp16le,loop=loop=-1:size=1[{tag}m]",
-        f"[{tag}l][{tag}m]blend=all_mode=multiply:shortest=1,lut1d=file='{encode}'[{tag}]",
-    ] if look.vignette else [f"[{tag}l]lut1d=file='{encode}'[{tag}]"])
+    cmd, graph, mix = [FFMPEG, "-v", "error", "-y", "-init_hw_device", "vulkan=gpu", "-filter_hw_device", "gpu",
+                       "-f", "rawvideo", "-pix_fmt", "p010le", "-s", f"{w}x{h}", "-r", rate, "-i", "-"], ["[0:v]setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709,hwupload[v]"], []
+    for track in timeline.audio_tracks():
+        for clip, start, dur, at, item in items(track):
+            cmd += ["-ss", f"{start:.3f}", "-t", f"{dur.to_seconds():.3f}", "-i", str(clip)]
+            d = dur.to_seconds()
+            graph.append(f"[{len(mix) + 1}:a]loudnorm=I={item.metadata.get('footage', {}).get('lufs', -20)}:TP=-2,aresample=48000,"
+                         f"afade=t=in:d=0.08,afade=t=out:st={max(d - 0.08, 0):.3f}:d=0.08,"
+                         f"adelay={round(at * 1000)}:all=1[m{len(mix)}]")
+            mix.append(len(mix) + 1)
+    maps = ["-map", "[v]"]
+    if mix:
+        graph.append("".join(f"[m{k}]" for k in range(len(mix))) + f"amix=inputs={len(mix)}:normalize=0:duration=longest,"
+                     f"atrim=0:{total:.3f}" + (f",afade=t=out:st={total - fade_out:.3f}:d={fade_out}" if fade_out else "") + "[a]")
+        maps += ["-map", "[a]", "-c:a", "aac", "-b:a", "256k"]
+    return subprocess.Popen([*cmd, "-filter_complex", ";".join(graph), *maps, "-c:v", "hevc_vulkan", "-profile:v", "main10",
+                             "-rc_mode", "cqp", "-qp", str(qp), "-tag:v", "hvc1", "-write_tmcd", "0",
+                             "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
 
 
 def render(edit: Path, name: str | None = None) -> Path:
@@ -123,8 +126,8 @@ def render(edit: Path, name: str | None = None) -> Path:
     settings = timeline.metadata.get("footage", {})
     look = grade.look(name or settings.get("look", grade.DEFAULT))
     fade_in, fade_out = settings.get("fades", (FADE_IN, FADE_OUT))
-    out = edit.with_name(f"{edit.stem} - {look.name}.mp4")
-    part = out.with_suffix(".part.mp4")
+    master = edit.with_name(f"{edit.stem} - {look.name}.mp4")
+    part = master.with_suffix(".part.mp4")
     total = timeline.duration().to_seconds()
     pictures = [(p, read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
@@ -134,65 +137,55 @@ def render(edit: Path, name: str | None = None) -> Path:
         raise SystemExit("a full-frame render needs clips of one shape")
     size = (round(h * (view.full_width(filmed[0]) if full else view.ASPECT) / 2) * 2, h)
     rate = filmed[0]["facts"]["fps"]
-    # Each shot is graded and encoded on its own, then the shots are joined without re-encoding: one graph holding
-    # every shot's 5K decoder and frames at once reached 15 GB on 24 shots and made no frame in 5 hours.
-    pieces = out.with_name(f"{out.stem}.shots")
-    pieces.mkdir(exist_ok=True)
+    fps = float(Fraction(rate))
     print(f"  {len(pictures)} shots at {size[0]}x{size[1]} in {look.name}", flush=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        for i, ((clip, start, dur, at, item), sc) in enumerate(pictures):
-            n = round(dur.to_frames())
-            if sc is None:
-                cmd, graph = [], [title(item, size, rate, n, "v")]
-            else:
-                cmd = ["-threads", "8", "-ss", f"{start:.3f}", "-t", f"{dur.to_seconds() + 1:.3f}", "-i", view.source(clip, sc)]
-                eased = retime(sc, start, dur.to_seconds()) or ""
-                if eased:
-                    print(f"  {clip.stem}: retimed focus pull", flush=True)
-                graph = [f"[0:v]trim=end_frame={n},setpts=PTS-STARTPTS,{eased}{framing(sc, size, full)},"
-                         f"tpad=stop_mode=clone:stop=2,trim=end_frame={n}[s]"] + picture("s", sc, size, Path(tmp), "v", look)
-            # The edit's fades are placed in edit time, so a shot is moved to its place in the edit for them.
-            graph.append(f"[v]setpts=PTS-STARTPTS+{at:.6f}/TB," + (f"fade=t=in:d={fade_in}," if fade_in else "")
-                         + (f"fade=t=out:st={total - fade_out:.3f}:d={fade_out}," if fade_out else "")
-                         # The camera's full-range flag must not reach the master: players expect standard (limited) range.
-                         + "setpts=PTS-STARTPTS,scale=out_color_matrix=bt709:out_range=limited,format=yuv420p10le[o]")
-            print(f"  shot {i + 1}/{len(pictures)}: {clip.stem if clip else 'title'}", flush=True)
-            subprocess.run([FFMPEG, "-v", "error", "-stats", "-y", *cmd, "-filter_complex", ";".join(graph), "-map", "[o]",
-                            "-frames:v", str(n), "-r", rate, *ENCODE, "-crf", str(settings.get("crf", 16)), str(pieces / f"{i:03}.mp4")], check=True)
-    (pieces / "list.txt").write_text("".join(f"file '{i:03}.mp4'\n" for i in range(len(pictures))))
-    cmd, graph, mix = [FFMPEG, "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(pieces / "list.txt")], [], []
-    for track in timeline.audio_tracks():
-        for clip, start, dur, at, item in items(track):
-            cmd += ["-ss", f"{start:.3f}", "-t", f"{dur.to_seconds():.3f}", "-i", str(clip)]
-            d = dur.to_seconds()
-            graph.append(f"[{len(mix) + 1}:a]loudnorm=I={item.metadata.get('footage', {}).get('lufs', -20)}:TP=-2,aresample=48000,"
-                         f"afade=t=in:d=0.08,afade=t=out:st={max(d - 0.08, 0):.3f}:d=0.08,"
-                         f"adelay={round(at * 1000)}:all=1[m{len(mix)}]")
-            mix.append(len(mix) + 1)
-    maps = ["-map", "0:v", "-c:v", "copy", "-tag:v", "hvc1"]
-    if mix:
-        graph.append("".join(f"[m{k}]" for k in range(len(mix))) + f"amix=inputs={len(mix)}:normalize=0:duration=longest,"
-                     f"atrim=0:{total:.3f}" + (f",afade=t=out:st={total - fade_out:.3f}:d={fade_out}" if fade_out else "") + "[a]")
-        maps = ["-filter_complex", ";".join(graph), *maps, "-map", "[a]", "-c:a", "aac", "-b:a", "256k"]
-    subprocess.run([*cmd, *maps, "-write_tmcd", "0", "-movflags", "+faststart", str(part)], check=True)
-    for f in pieces.iterdir():
-        f.unlink()
-    pieces.rmdir()
-    part.rename(out)  # a render that stops leaves its part, never a short master under the master's name
-    return out
+    enc = encoder(timeline, size, rate, total, fade_out, settings.get("crf", QP), part)
+    out, done, encoded = queue.Queue(picture.AHEAD), 0, picture.Encoded()
+    failed: list = []
+
+    def feed():  # the encoder is fed from its own thread, so writing a frame overlaps grading the next
+        while (f := out.get()) is not None:
+            try:
+                failed or enc.stdin.write(f)
+            except OSError as e:  # the encoder stopped: keep taking frames so the render can end and report it
+                failed.append(e)
+    writer = threading.Thread(target=feed, daemon=True)
+    writer.start()
+    for (clip, start, dur, at, item), sc in pictures:
+        n = round(dur.to_frames())
+        if sc is None:
+            source, grading = picture.frames(title(item, size, rate, n), size, "gbrp16le", True), None
+        else:
+            eased = retime(sc, start, dur.to_seconds()) or ""
+            if eased:
+                print(f"  {clip.stem}: retimed focus pull", flush=True)
+            source, grading = decode(clip, sc, start, n, eased, full), picture.shot(sc, look, size)
+        for frame in source:
+            t = done / fps
+            fade = min(1.0, t / fade_in if fade_in else 1.0, (total - t) / fade_out if fade_out else 1.0)
+            out.put(encoded((grading(frame) if grading else frame) * max(fade, 0.0)))
+            done += 1
+        print(f"  {clip.stem if clip else 'title'}: {done} frames", flush=True)
+    out.put(None)
+    writer.join()
+    if not failed:
+        enc.stdin.close()
+    if enc.wait():
+        raise subprocess.CalledProcessError(enc.returncode, FFMPEG)
+    part.rename(master)  # a render that stops leaves its part, never a short master under the master's name
+    return master
 
 
 def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     """One graded frame at the master's full size, as a maximum-quality JPEG."""
+    import cv2
     sc = read(clip, ("measured",))
-    if not 0 <= t < sc["facts"]["duration"]:  # past the end ffmpeg writes nothing, or waits forever on the vignette
+    if not 0 <= t < sc["facts"]["duration"]:  # past the end ffmpeg writes nothing
         raise SystemExit(f"{clip.name} is {sc['facts']['duration']:.1f} s long: no frame at {t:g} s")
-    with tempfile.TemporaryDirectory() as tmp:
-        size = view.master([sc])
-        graph = [f"[0:v]{framing(sc, size)}[f]"] + picture("f", sc, size, Path(tmp), "x", look) + ["[x]format=rgb24[o]"]
-        subprocess.run([FFMPEG, "-v", "error", "-y", "-threads", "4", "-ss", f"{t:.3f}", "-i", view.source(clip, sc),
-                        "-filter_complex", ";".join(graph), "-map", "[o]", "-frames:v", "1",
-                        "-pix_fmt", "yuvj444p", "-q:v", "1", str(out)], check=True)
+    size = view.master([sc])
+    rgb = picture.shot(sc, look, size)(next(decode(clip, sc, t, 1)))
+    bgr = (rgb[[2, 1, 0]].permute(1, 2, 0) * 255).round().byte().cpu().numpy()
+    cv2.imwrite(str(out), bgr, [cv2.IMWRITE_JPEG_QUALITY, 100, cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444])
     return out
 
 

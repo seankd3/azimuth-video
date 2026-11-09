@@ -4,8 +4,8 @@ A look is a named print, `looks/NAME.json`: a film-print LUT baked by spektrafil
 is printed (contrast, warmth, black and white levels, halation, vignette). One look covers a whole edit, so every shot
 is printed the same way. What varies by shot is only its balance, computed from the sidecar's `measured` section each
 time and never stored: neutralize the measured white balance and bring the shot's average exposure to the look's.
-For each shot the picture LUT takes camera code values to the print; the halation LUTs take them to how close each
-pixel came to clipping, which the render blurs, tints and adds back over the picture as light (write_halation).
+For each shot the print LUT takes camera code values to the print; the halation curve takes them to how close each
+pixel came to clipping, which picture.py blurs, tints and adds back over the picture as light.
 
 python -m footage.grade  lists the looks.
 """
@@ -165,17 +165,11 @@ def grey_axis(look: Path) -> list[tuple[np.ndarray, np.ndarray]]:
     return [(np.maximum.accumulate(grey[:, c]), target) for c in range(3)]
 
 
-def write_cube(path: Path, values: np.ndarray) -> Path:
-    with open(path, "w") as f:
-        f.write(f"LUT_3D_SIZE {SIZE}\n")
-        np.savetxt(f, values, fmt="%.6f")
-    return path
-
-
-def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> Path:
-    """This shot's picture LUT, taking the camera's code values."""
+def print_lut(sc: dict, look: Look) -> np.ndarray:
+    """This shot's print LUT: camera code values on a SIZE^3 grid (red changing fastest, as in a .cube file) to the
+    display Rec.709 print."""
     grid = np.linspace(0, 1, SIZE)
-    b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")  # .cube order: red changes fastest
+    b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")
     lin = color.to_linear_709(np.stack([r, g, b], axis=-1).reshape(-1, 3), sc["assumed"])
     lin = lin * shading(sc, look, lin) * balance(sc, look)
     if look.night and dark(sc, look):  # colour fades out of the shadows of a night: a lot under green lights reads dark
@@ -194,64 +188,37 @@ def write_luts(sc: dict, folder: Path, tag: str, look: Look) -> Path:
     if look.black is not None:
         s = np.clip((0.5 - picture) / (0.5 - black), 0, 1)
         picture = picture + s * s * (look.black - black)
-    return write_cube(folder / f"{tag}.cube", picture)
+    return picture.astype(np.float32)
 
 
-def write_1d(path: Path, values: np.ndarray) -> Path:
-    with open(path, "w") as f:
-        f.write(f"LUT_1D_SIZE {len(values)}\n")
-        np.savetxt(f, values, fmt="%.7f")
-    return path
-
-
-def write_halation(sc: dict, folder: Path, tag: str, look: Look) -> tuple[Path, Path, Path]:
-    """This shot's halation: a shaper and a 3D LUT taking the camera's code values to the glow source, and a 1D LUT
-    taking the blurred source to the tinted light it adds.
+def halation(sc: dict, look: Look) -> tuple[np.ndarray, np.ndarray]:
+    """This shot's halation: the glow source for each code value of a pixel's brightest channel (0..1, on 65536
+    steps), and the gain per channel that takes the blurred source to the tinted light it adds (at most 1).
 
     A light is what the camera couldn't hold: the source is how close a pixel came to the sensor's clipping point, 0
     below the last halation_from stops and 1 at the clip, judged by its brightest channel in the camera's own light, so
     a lamp clipped in one channel counts and a white shirt or wall doesn't, however the shot was exposed or is printed.
-    The shaper spends the 3D grid on the top of the code range, where that knee is. The glow's strength is the clipped
-    light as this shot is printed (its balance), so it is applied after the blur and never runs out of range. The tint
-    is applied there too, so the dim skirt of a blue-poor glow keeps 16-bit steps."""
+    The glow's strength is the clipped light as this shot is printed (its balance), so it is applied after the blur."""
     codes = np.linspace(0, 1, 65536)
     light = color.decode(np.repeat(codes[:, None], 3, axis=1), sc["assumed"])[:, 0]  # one channel's transfer
     stops = np.log2(np.maximum(light, 1e-12) / np.interp(color.CLIP, codes, light))  # below clip, per code value
-    low = float(np.interp(-1.25 * look.halation_from, stops, codes))  # the grid starts a little below the knee
-    grid = low + (1 - low) * np.linspace(0, 1, SIZE)
-    b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")  # .cube order: red changes fastest
-    brightest = np.interp(np.maximum(np.maximum(r, g), b).ravel(), codes, stops)
-    near = np.clip(1 + brightest / look.halation_from, 0, 1)
+    near = np.clip(1 + stops / look.halation_from, 0, 1)
     clipped = color.luminance(color.to_linear_709(np.full(3, color.CLIP), sc["assumed"]) * balance(sc, look))
-    glow = np.minimum(look.halation * clipped * np.linspace(0, 1, 4096)[:, None] * np.array(look.halation_tint), 1)
-    return (write_1d(folder / f"{tag}-shaper.cube", np.repeat(np.clip((codes - low) / (1 - low), 0, 1)[:, None], 3, axis=1)),
-            write_cube(folder / f"{tag}-halation.cube", np.repeat((near * near * (3 - 2 * near))[:, None], 3, axis=1)),
-            write_1d(folder / f"{tag}-glow.cube", glow))
+    return (near * near * (3 - 2 * near)).astype(np.float32), (look.halation * clipped * np.array(look.halation_tint)).astype(np.float32)
 
 
-def write_display(folder: Path) -> tuple[Path, Path]:
-    """1D LUTs between display Rec.709 and linear display light, where the glow is added.
-
-    The print maps 18% grey to about 17% display light, so light added on the display side lands close to where the
-    same light added to the negative would."""
-    x = np.linspace(0, 1, 65536)[:, None] * np.ones(3)
-    return write_1d(folder / "decode.cube", x ** 2.4), write_1d(folder / "encode.cube", x ** (1 / 2.4))
-
-
-def write_vignette(path: Path, size: tuple[int, int], look: Look, squeeze: float = 1.0) -> Path:
-    """A 16-bit mask that darkens the edges: untouched out to VIGNETTE_FLAT of the way to the corners, then rolling
-    off smoothly to look.vignette stops darker in the corners. A natural cos^4 lens falloff starts in the middle and
-    reads as a darker picture rather than darker edges; a flat centre keeps the subject as graded and frames it.
+def vignette(size: tuple[int, int], look: Look, squeeze: float = 1.0) -> np.ndarray:
+    """A mask that darkens the edges: untouched out to VIGNETTE_FLAT of the way to the corners, then rolling off
+    smoothly to look.vignette stops darker in the corners. A natural cos^4 lens falloff starts in the middle and reads
+    as a darker picture rather than darker edges; a flat centre keeps the subject as graded and frames it.
 
     A lens darkens in a circle on the sensor, so through an anamorphic lens the falloff desqueezes to an oval as wide
     as the squeeze: the top and bottom edges darken too, not only the sides of a wide frame."""
-    import cv2
     w, h = size
     y, x = np.ogrid[:h, :w]
     d = np.hypot((x - w / 2) / squeeze, y - h / 2) / np.hypot(w / 2 / squeeze, h / 2)
     t = np.clip((d - VIGNETTE_FLAT) / (1 - VIGNETTE_FLAT), 0, 1)
-    cv2.imwrite(str(path), np.round(2.0 ** (-look.vignette * t * t * (3 - 2 * t)) * 65535).astype(np.uint16))
-    return path
+    return (2.0 ** (-look.vignette * t * t * (3 - 2 * t))).astype(np.float32)
 
 
 if __name__ == "__main__":

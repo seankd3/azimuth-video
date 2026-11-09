@@ -40,7 +40,7 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 9. **Find takes.** Clips shot one after another from one camera position are takes of one angle: their backgrounds line up
    (matched corner points of three frames). The best take is the last one, unless it lacks the action: then it is the
    last take that moves at least half as long as the take that moves longest. `find --best` keeps only best takes.
-10. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture graph:
+10. **Grade and render.** It renders an OpenTimelineIO timeline, or single stills, through one picture path on the GPU:
    - each shot gets its own exposure and white-balance correction;
    - the whole edit is printed in one look you choose: a spektrafilm film-stock simulation, how hard it is printed,
      its warmth, halation around what the camera clipped (lamps, speculars, backlit edges; not white shirts or
@@ -52,8 +52,9 @@ it stops, and search leaves it out and says how many clips it skipped sections o
      lit surfaces, so mixed light leaves no tint. A bright room stays bright, and a dark shot is shown as exposed (for its lit part, a doorway at night), darker, with colour fading out of its shadows as it does for the eye at night.
      The highlights are kept under the shoulder (the look's `key`, `dark`, `night`, `headroom`, `shadows` and `tint` settings).
 
-   Each shot is graded and encoded on its own and the shots are joined without re-encoding, so a long edit needs
-   no more memory than its largest shot. The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
+   ffmpeg decodes each shot (NVDEC), the GPU desqueezes, grades and adds the halation in a few fused kernels
+   (torch.compile), and the GPU's HEVC encoder writes the master through Vulkan video. A render holds a few frames at
+   a time however long the edit is, and stills go through the same path. The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
    A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
    documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
 
@@ -99,7 +100,7 @@ date when run again. It needs uv, curl, a C++ compiler, make and the CUDA toolki
 
 - Python 3.12 in `.venv`, with the packages in `setup/requirements.txt`: torch and onnxruntime-gpu run the models on
   the GPU, and dlib is built with CUDA so its face detector does too.
-- `ffmpeg-gpu`: FFmpeg 8.1 (a BtbN build) with NVDEC and 10-bit x265.
+- `ffmpeg-gpu`: FFmpeg 8.1 (a BtbN build) with NVDEC, Vulkan video encoding and 10-bit x265.
 - LibRaw 0.22.3, built with its 2 GB file cap raised: packaged builds refuse a RAW clip over 2 GB, about 11 seconds of 8K.
 - The models, in `~/.local/share/footage/models`, each file checked against its sha256 in `setup/models.txt`: dlib's
   face detector, landmarks and recognition, Parakeet TDT 0.6B v2 and Silero VAD (onnx-asr's exports), EmbeddingGemma 2,
