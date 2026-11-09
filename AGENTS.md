@@ -7,4 +7,7 @@ This adds to the agent rules every project shares. README.md is the manual.
   footage.
 - The repository is public. Code, commits and issues never name a site, company, person, place or clip. Site
   specifics live in `~/.config/azimuth-video/config.json` and in edit scripts outside the repository.
-- Footage, sidecars, `people.json` and renders stay on the machine, never in git.
+- Footage, sidecars, `people.json` and renders stay on the machine, never in git. That includes stills and single
+  frames taken from real footage: none go in the repository, the README or any public post. Demo imagery, if any is
+  ever added, comes from synthetic clips or from footage shot for the purpose and cleared for publication, never
+  from the library.
