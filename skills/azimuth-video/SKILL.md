@@ -27,7 +27,7 @@ If `footage` is missing, run the repository's `install.sh`.
 - **You are the describer.** `footage` writes description questions under `~/Videos/Library/.questions/`. Answer each
   as its `question.json` asks, from its frames, then run `footage` again to store the answers.
 - **Heavy jobs** (the library run, renders, describing many clips) go through `heavy NAME COMMAND`: a systemd unit that
-  survives the session, runs one heavy job at a time and can't use the memory the desktop needs. Have COMMAND write a
+  survives the session, waits in the heavy queue until its memory fits and can't use the memory the desktop needs. Have COMMAND write a
   log and a status file with its exit code, and check them instead of waiting in the foreground.
 - **Models.** Footage, its frames and its sound leave the machine only to Claude. No Chinese model and no runtime from a
   Chinese maker (Qwen, Kimi, YuNet, SFace, sherpa-onnx, ACE-Step) runs here, even locally. Before adding a model,

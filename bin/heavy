@@ -1,22 +1,73 @@
-#!/bin/sh
-# heavy NAME COMMAND...: run a heavy media or model job as the user unit NAME, guarded so it can't freeze the desktop.
+#!/bin/bash
+# heavy [-l LANE] [-w] NAME COMMAND...: run a heavy job as the user unit NAME, in a queue that keeps the desktop's memory.
 #
-# - It survives the app or terminal that started it: it is a systemd user unit (journalctl --user -u NAME).
-# - One at a time: it waits for any other heavy job to finish (a lock), then for 16 GB of free memory, so the desktop
-#   keeps its share.
-# - A ceiling: it runs in app-heavy.slice, capped at 16 GB with no swap; over that the kernel stops the job.
+# - It survives the app or terminal that started it: NAME is a systemd user unit, active while the job waits and runs,
+#   and the job's output is in journalctl --user -u NAME-job. With -w it runs in the foreground instead: its output and
+#   exit code come back here.
+# - A queue: the job waits behind earlier jobs of its lane until it fits. It fits when the jobs running in
+#   app-heavy.slice, each counted at its lane's peak or its memory now (whichever is more), leave room for its own peak
+#   under the slice's MemoryHigh, and the machine has its peak plus 4 GB free. A job waiting holds nothing, so the
+#   slots follow the slice and the peaks.
+# - A ceiling: the job runs in app-heavy.slice with no swap; past MemoryHigh it is slowed, at MemoryMax the kernel stops it.
+# - It runs as if it ran here: in this folder, with this shell's environment. Without -w, systemd expands $VAR in
+#   COMMAND once, as it did before the queue; with -w, COMMAND runs as given.
 # - GPU memory: on a machine whose GPU shares system memory, allocations through the GPU driver are not counted against
 #   the slice. JAX takes 75% of GPU memory up front by default, which once froze a desktop, so JAX allocates as it
 #   goes and never takes more than 20%; PyTorch frees what it no longer uses.
-# Output goes to the journal unless COMMAND redirects it.
-set -e
+#
+# A lane is a kind of job and the memory its runs peak at, in GB.
+lanes='
+media  12 a library run, a render or a model job: a library run peaked near 12 GB
+dev    5  a test suite, a build or a type check: 1,035 such runs on one machine peaked at 4.9 GB (p99)
+review 2  a code review by a model: 96 such runs on one machine peaked at 1.9 GB (max)
+'
+set -eu
+lane=media wait=
+while getopts l:w opt; do case $opt in l) lane=$OPTARG;; w) wait=1;; *) exit 2;; esac; done
+shift $((OPTIND - 1))
+[ $# -ge 2 ] || { echo "usage: heavy [-l LANE] [-w] NAME COMMAND..." >&2; exit 2; }
+gb=$(awk -v l="$lane" '$1 == l {print $2}' <<<"$lanes")
+[ -n "$gb" ] || { echo "heavy: no lane $lane; the lanes are: $(awk 'NF {printf "%s ", $1}' <<<"$lanes")" >&2; exit 2; }
 name=$1; shift
-exec systemd-run --user --quiet --collect --unit="$name" --slice=app-heavy.slice --working-directory="$PWD" \
-  --setenv=PATH="$PATH" --setenv=XLA_PYTHON_CLIENT_PREALLOCATE=false --setenv=XLA_PYTHON_CLIENT_MEM_FRACTION=0.2 \
-  --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-  flock "$HOME/.cache/heavy.lock" sh -c '
-    # Hand back the file cache earlier jobs left charged to the slice, which its MemoryLow would otherwise shield.
-    slice=/sys/fs/cgroup$(dirname "$(cut -d: -f3 /proc/self/cgroup)")
-    echo "$(cat "$slice/memory.current")" > "$slice/memory.reclaim" 2>/dev/null || true
-    while [ "$(awk "/MemAvailable/ {print int(\$2 / 1048576)}" /proc/meminfo)" -lt 16 ]; do sleep 10; done
-    exec "$@"' heavy "$@"
+env=(); for v in $(compgen -e); do case $v in *[!A-Za-z0-9_]*|HEAVY_GB|INVOCATION_ID|JOURNAL_STREAM|MANAGERPID|NOTIFY_SOCKET|LISTEN_*|SYSTEMD_*) ;; *) env+=("--setenv=$v");; esac; done
+
+# Without -w, the unit NAME waits in the queue and then follows the job: it runs heavy -w for it, so NAME is active
+# from now, ends with the job's exit code, and stopping it stops the job.
+[ -n "$wait" ] || exec systemd-run --user --quiet --collect --unit="$name" --working-directory="$PWD" "${env[@]}" \
+  "$(readlink -f "$0")" -l "$lane" -w "$name-job" "$@"
+
+G=$((1 << 30)) need=$((gb << 30))
+fits() {
+  local high used=0 units=0 cur unit peak slice
+  high=$(systemctl --user show -P MemoryHigh app-heavy.slice)
+  # A slice with no job running has no cgroup, and then it holds nothing.
+  slice=$(systemctl --user show -P ControlGroup app-heavy.slice)
+  if [ -n "$slice" ]; then
+    slice=/sys/fs/cgroup$slice
+    for unit in "$slice"/*.service "$slice"/*.scope; do
+      [ -e "$unit/memory.current" ] || continue
+      cur=$(cat "$unit/memory.current"); peak=$(systemctl --user show -P Environment "${unit##*/}" | grep -o 'HEAVY_GB=[0-9]*' | cut -d= -f2)
+      peak=$(( ${peak:-0} * G )); used=$(( used + (cur > peak ? cur : peak) )); units=$((units + 1))
+    done
+    # The file cache that ended jobs left charged to the slice counts against its MemoryHigh and its MemoryLow shields
+    # it, so it goes back first.
+    cur=$(cat "$slice/memory.current" 2>/dev/null || echo 0)
+    [ $((cur - used)) -le 0 ] || echo $((cur - used)) > "$slice/memory.reclaim" 2>/dev/null || true
+  fi
+  [ $(( $(awk '/MemAvailable/ {print $2}' /proc/meminfo) * 1024 )) -ge $((need + 4 * G)) ] || return 1
+  [ "$units" = 0 ] || [ "$high" = infinity ] || [ $((used + need)) -le "$high" ]
+}
+
+# Jobs of one lane start in the order they came; a lane that waits for room holds up no other lane. The admission lock
+# is held only to check and start, so two lanes never both take the same room.
+exec 8>"$HOME/.cache/heavy-$lane.lock" 9>"$HOME/.cache/heavy-admit.lock"
+flock 8
+until flock 9 && fits; do flock -u 9; sleep 10; done
+systemd-run --user --quiet --collect --wait --pipe --expand-environment=no --unit="$name" --slice=app-heavy.slice --working-directory="$PWD" "${env[@]}" \
+  --setenv=HEAVY_GB="$gb" --setenv=XLA_PYTHON_CLIENT_PREALLOCATE=false --setenv=XLA_PYTHON_CLIENT_MEM_FRACTION=0.2 \
+  --setenv=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True "$@" <&0 8>&- 9>&- &
+run=$!
+trap 'systemctl --user stop "$name"' INT TERM
+until systemctl --user is-active --quiet "$name" || ! kill -0 "$run" 2>/dev/null; do sleep 0.2; done
+exec 8>&- 9>&-
+wait "$run"
