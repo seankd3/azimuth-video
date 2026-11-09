@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import embed, focus, library, passes, people, sidecar, takes
+from . import embed, focus, library, passes, people, sidecar, sound, takes
 from .frame import seconds
 from .transcribe.formats import turns
 
@@ -43,6 +43,7 @@ def record(clip: Path, sc: dict) -> dict:
             "size": d.get("shot_size"), "summary": d.get("summary"), "tags": d.get("tags", []),
             "person": sc.get("person"), "voices": sc.get("voices", {}),
             "moving": focus.moving(sc), "usable": focus.usable(sc), "cutpoints": focus.cutpoints(sc),
+            "lufs": sound.loudness(sc), "silence": sound.silence(sc), "clipped": sound.clipped(sc),
             "pulls": [(p["start"], p["end"], p["kind"]) for p in sc.get("focus", {}).get("pulls", [])],
             "speech": [(t["start"], t["end"], t["text"]) for t in turns(sc.get("transcript", {}).get("words", []))]}
 

@@ -26,7 +26,12 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    apart. The same transcriber runs on any recording: `python -m footage.transcribe FILE` writes its words, Markdown
    and SRT/VTT subtitles. A clip's sidecar and a recording's `.transcript.json` hold one shape: every word with its
    voice, and every voice with its print. The code is the `footage/transcribe/` package: `hear.py` hears,
-   `formats.py` writes the files.
+   `formats.py` writes the files. A sound pass beside it records each second's K-weighted loudness (LUFS) and peak,
+   so `find` can report a clip's loudness, its silent stretches and the seconds where the recorder clipped.
+   `python -m footage.sync A B [--write]` finds where one recording of an event sits inside another's time, from
+   their sound, and can record the offset in both sidecars. `python -m footage.script CLIP` lists the clip's
+   sentences; `--keep 1,3-5` writes a timeline of exactly those seconds, its sound marked dialogue, so speech is
+   cut by deleting sentences rather than by hunting timecodes.
 5. **Measure.** It measures exposure, white balance, clipping, sharpness and motion. It also finds faces and measures how they are lit.
 6. **Find focus pulls and movement.** It tracks sharpness across the frame on every frame. It records each rack focus, when it starts and when it settles.
    Second by second, it also tells the camera's own movement apart from what moves in front of it, so `find --moving`
@@ -75,6 +80,8 @@ python -m footage.find --shows "a forklift backing up" --top 10   # moments whos
 python -m footage.find --like 2026-10-29/CLIP0001@12   # moments that look like second 12 of that clip
 python -m footage.find --day 2026-10-29 --moving --best   # one clip per camera angle, its best take, where it moves
 python -m footage.takes --day 2026-10-29   # each angle's takes, with the best marked and why
+python -m footage.sync A.MP4 B.MP4 --write   # where B starts inside A, from their sound, recorded in both sidecars
+python -m footage.script CLIP.MP4 --keep 1,3-5   # a timeline of only those sentences (no --keep: list them)
 python -m footage.render EDIT.otio [--look cinema,kodak-gold-200]   # render a timeline to "EDIT - LOOK.mp4"
 python -m footage.render --stills OUT_DIR [--look ...] CLIP@SECONDS ...   # full-resolution graded stills
 python -m footage.frame CLIP 02:05 [--out PATH.jpg]   # one desqueezed, ungraded frame of a clip (card, Ingest or Library), for a transcript's timestamp

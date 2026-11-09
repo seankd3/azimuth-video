@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import describe, embed, focus, measure, probe, takes, transcribe
+from . import describe, embed, focus, measure, probe, sound, takes, transcribe
 
 
 @dataclass
@@ -25,6 +25,7 @@ PASSES = [
     # Writes questions, and takes the answers its describer left; see describe.py.
     Pass("description", describe.describe, describe.identity, 2, 1),
     Pass("transcript", transcribe.clip, transcribe.identity, 1, 4),
+    Pass("sound", sound.sound, sound.identity, 2, 1),
     # Peaked at 3.6 GB on a 397 s clip (2026-11-09): four at once is the run's largest combined footprint.
     Pass("measured", measure.measure, measure.identity, 4, 4),
     # Reads every frame on the GPU decoder, one clip at a time: its frame buffers count as system memory on a
