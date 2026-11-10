@@ -111,16 +111,18 @@ date when run again. It needs uv, curl, a C++ compiler, make and the CUDA toolki
 
 - Python 3.12 in `.venv`, with the packages in `setup/requirements.txt`: torch and onnxruntime-gpu run the models on
   the GPU, and dlib is built with CUDA so its face detector does too.
-- `ffmpeg-gpu`: FFmpeg 8.1 (a BtbN build) with NVDEC, Vulkan video encoding and 10-bit x265.
+- `ffmpeg-gpu`: FFmpeg 8.1 (a BtbN build) with NVDEC, Vulkan video encoding and 10-bit x265. It runs only inside a
+  heavy media job; started anywhere else it refuses.
 - LibRaw 0.22.3, built with its 2 GB file cap raised: packaged builds refuse a RAW clip over 2 GB, about 11 seconds of 8K.
 - The models, in `~/.local/share/footage/models`, each file checked against its sha256 in `setup/models.txt`: dlib's
   face detector, landmarks and recognition, Parakeet TDT 0.6B v2 and Silero VAD (onnx-asr's exports), EmbeddingGemma 2,
   and NVIDIA's TitaNet-large, exported to ONNX on your machine with NVIDIA NeMo (`setup/titanet.py`). The folder is
   read-only: a section is identified by its models' file names and sizes, so a new model or version goes in under a
   new name, never over an old file.
-- `footage TOOL ARGS` in `~/.local/bin`, the same as `python -m footage.TOOL` in the environment, and `heavy NAME
-  COMMAND`, which runs a long job as a systemd user unit, one at a time, under a 16 GB memory ceiling
-  (`setup/app-heavy.slice`), so the desktop stays responsive.
+- `footage TOOL ARGS` in `~/.local/bin`, the same as `python -m footage.TOOL` in the environment, and `heavy [-l LANE]
+  NAME COMMAND`, which queues a long job as a systemd user unit under its lane's memory ceiling, so the desktop stays
+  responsive. The media lane (the default: the library run, renders, model jobs) runs one job at a time in
+  `setup/gpu.slice`, the only place GPU work runs; the dev and review lanes share `setup/app-heavy.slice`.
 - The skills in `skills/`, linked into Claude Code and Codex: `azimuth-video` teaches an agent to offload a card, find
   shots, describe clips and cut, grade and render edits in code; `transcribe` turns any recording into a transcript
   with speaker labels. With them, you work by asking the agent ("offload the card and cut the shots where the robots move").

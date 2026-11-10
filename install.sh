@@ -49,9 +49,9 @@ if [ ! -x "$F/bin/ffmpeg" ]; then
   mkdir -p "$F" && curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-$FFARCH-gpl-8.1.tar.xz" \
     | tar xJ -C "$F" --strip-components=1
 fi
-ln -sf "$F/bin/ffmpeg" "$BIN/ffmpeg-gpu"
+rm -f "$BIN/ffmpeg-gpu" && sed "s|@FFMPEG@|$F/bin/ffmpeg|" "$REPO/bin/ffmpeg-gpu" > "$BIN/ffmpeg-gpu" && chmod +x "$BIN/ffmpeg-gpu"
 for t in ffmpeg ffprobe; do command -v "$t" > /dev/null || ln -sf "$F/bin/$t" "$BIN/$t"; done
-"$BIN/ffmpeg-gpu" -hide_banner -version | head -1
+"$F/bin/ffmpeg" -hide_banner -version | head -1
 
 say "LibRaw 0.22.3"
 if [ ! -x "$VENDOR/libraw/bin/dcraw_emu" ]; then
@@ -100,7 +100,7 @@ du -sh "$MODELS"
 
 say "Commands, memory limit and skills"
 for c in footage heavy; do sed "s|@REPO@|$REPO|" "$REPO/bin/$c" > "$BIN/$c" && chmod +x "$BIN/$c"; done
-mkdir -p "$HOME/.config/systemd/user" && cp "$REPO/setup/app-heavy.slice" "$HOME/.config/systemd/user/" && systemctl --user daemon-reload
+mkdir -p "$HOME/.config/systemd/user" && cp "$REPO"/setup/*.slice "$HOME/.config/systemd/user/" && systemctl --user daemon-reload
 for agent in "$HOME/.claude" "$HOME/.codex"; do
   [ -d "$agent" ] || continue
   mkdir -p "$agent/skills"

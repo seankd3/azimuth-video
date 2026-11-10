@@ -1,0 +1,11 @@
+[Unit]
+Description=GPU jobs (heavy's media lane): one at a time, outside every other ceiling
+
+[Slice]
+# A GPU job under memory reclaim holds the GPU driver's global lock, which the compositor waits on to draw. So the GPU
+# slice sits beside the other work, never under its ceiling, with no swap and no soft cap: at MemoryMax the kernel
+# stops the job at once. One library run (peak near 12 GB) fits; a second waits in heavy's queue.
+MemoryMax=14G
+MemorySwapMax=0
+CPUWeight=20
+IOWeight=20

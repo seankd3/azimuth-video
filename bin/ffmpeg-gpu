@@ -1,0 +1,9 @@
+#!/bin/sh
+# ffmpeg-gpu: FFmpeg 8.1 with NVDEC, Vulkan video and 10-bit x265, run only as a heavy job in the GPU's own slice
+# (`heavy -l media NAME COMMAND`), where reclaim and swap cannot stall the GPU driver the desktop draws through.
+# install.sh writes this to ~/.local/bin with the build's place filled in.
+case $(cat /proc/self/cgroup) in
+  */gpu.slice/*) exec "@FFMPEG@" "$@" ;;
+esac
+echo "ffmpeg-gpu runs only in a heavy media job: heavy -l media NAME COMMAND" >&2
+exit 1
