@@ -1,14 +1,34 @@
-"""What picture each analysis sees: a clip's recorded frame desqueezed, the 2.39:1 window the edit shows, and sizes.
+"""What picture each analysis sees: a clip's recorded frame desqueezed, the window of it a shot shows, and sizes.
 
 Every decode in the toolkit takes its crop and scale from here, so a clip's geometry has one definition. A clip whose
 squeeze isn't known yet is read as unsqueezed. Every decode reads the file `source` names: the clip itself, or for a
 RAW clip its developed picture (develop.py).
+
+A shot's framing is what a person chose: {"turn": quarter turns clockwise, "center": [x, y], "zoom": z}, each key
+optional. The window is the largest rectangle of the edit's aspect that fits in the turned, desqueezed frame, made
+1/zoom as large and centred on `center` (fractions of that frame). With no framing a shot is not turned, is centred and
+shows its whole height or width: the 2.39:1 window, as shot. `frame` is the one door to a valid framing: the app stores
+what it returns, and the render reads every framing through it, so a hand-written edit renders as the app shows it.
 """
 from pathlib import Path
+from typing import NamedTuple
 
 from . import develop
 
-ASPECT = 2.39
+ASPECT = 2.39  # an edit's aspect unless it sets one: a number, or "full" for its first shot's whole frame
+ZOOM = (1.0, 8.0)  # a shot is pushed in at most 8x
+# Where a point of the turned frame (x, y) was before the turn, in a frame w x h: one clockwise quarter turn per row.
+UNTURN = (lambda x, y, w, h: (x, y), lambda x, y, w, h: (y, h - x),
+          lambda x, y, w, h: (w - x, h - y), lambda x, y, w, h: (w - y, x))
+
+
+class Window(NamedTuple):
+    """The recorded pixels a shot shows, before its turn, and the turn."""
+    x: int
+    y: int
+    w: int
+    h: int
+    turn: int
 VERSION = 1  # bump when what a picture is changes, so everything measured from pictures is redone
 
 
@@ -39,24 +59,51 @@ def full_width(sc: dict) -> float:
     return f["width"] * squeeze(sc) / f["height"]
 
 
-def window(sc: dict) -> tuple[int, int]:
-    """The centred region, in recorded pixels, that desqueezes to 2.39:1."""
-    f, s = sc["facts"], squeeze(sc)
-    if f["width"] * s / f["height"] >= ASPECT:
-        return round(f["height"] * ASPECT / s / 2) * 2, f["height"]
-    return f["width"], round(f["width"] * s / ASPECT / 2) * 2
+def aspect(value, scs: list) -> float:
+    """An edit's aspect as a number: its setting, or for "full" the first shot's whole frame."""
+    return full_width(scs[0]) if value == "full" else float(value)
 
 
-def master(scs: list) -> tuple[int, int]:
-    """The master's size: the largest 2.39:1 frame every clip can fill without upscaling vertically."""
-    h = min(window(sc)[1] for sc in scs)
-    return round(h * ASPECT / 2) * 2, h
+def turned(sc: dict, turn: int) -> tuple[float, float]:
+    """The desqueezed frame after `turn` clockwise quarter turns, in recorded rows."""
+    w, h = full_width(sc) * sc["facts"]["height"], sc["facts"]["height"]
+    return (h, w) if turn % 2 else (w, h)
 
 
-def full_frame(sc: dict, size: tuple[int, int]) -> tuple[float, float]:
-    """The whole recorded frame, desqueezed, at the scale where its 2.39:1 window fills size."""
-    cw, ch = window(sc)
-    return sc["facts"]["width"] * size[0] / cw, sc["facts"]["height"] * size[1] / ch
+def fitted(sc: dict, turn: int, aspect: float, zoom: float) -> tuple[float, float]:
+    """The window's size in the turned frame: the largest of `aspect` that fits, made 1/zoom as large."""
+    fw, fh = turned(sc, turn)
+    w, h = (fh * aspect, fh) if fw / fh >= aspect else (fw, fw / aspect)
+    return w / zoom, h / zoom
+
+
+def frame(sc: dict, framing: dict | None, aspect: float) -> dict:
+    """A shot's framing made valid for an edit of `aspect`: a quarter turn, a zoom in ZOOM, and the window inside the
+    frame. Idempotent."""
+    f = framing or {}
+    turn, zoom = int(f.get("turn", 0)) % 4, min(max(float(f.get("zoom", 1)), ZOOM[0]), ZOOM[1])
+    (fw, fh), (w, h) = turned(sc, turn), fitted(sc, turn, aspect, zoom)
+    cx, cy = f.get("center", (0.5, 0.5))
+    return {"turn": turn, "center": [min(max(cx, w / 2 / fw), 1 - w / 2 / fw), min(max(cy, h / 2 / fh), 1 - h / 2 / fh)],
+            "zoom": zoom}
+
+
+def window(sc: dict, framing: dict | None = None, aspect: float = ASPECT) -> Window:
+    """The recorded pixels a shot shows: even sizes (chroma is subsampled), centred where its framing says."""
+    f = frame(sc, framing, aspect)
+    turn, s, (W, H) = f["turn"], squeeze(sc), (sc["facts"]["width"], sc["facts"]["height"])
+    (fw, fh), (w, h) = turned(sc, turn), fitted(sc, turn, aspect, f["zoom"])
+    rw, rh = (h, w) if turn % 2 else (w, h)  # across and down the recorded frame, in rows
+    rw, rh = round(rw / s / 2) * 2, round(rh / 2) * 2
+    x, y = UNTURN[turn](f["center"][0] * fw, f["center"][1] * fh, W * s, H)
+    return Window(min(max(round(x / s - rw / 2), 0), W - rw), min(max(round(y - rh / 2), 0), H - rh), rw, rh, turn)
+
+
+def master(scs: list, aspect: float = ASPECT) -> tuple[int, int]:
+    """The master's size: `aspect`, as tall as the shortest window any clip shows unframed, so the footage sets it and
+    no clip is upscaled vertically unless its framing pushes in or turns it."""
+    h = min(window(sc, None, aspect).h for sc in scs)
+    return round(h * aspect / 2) * 2, h
 
 
 def size(sc: dict, width: int) -> tuple[int, int]:

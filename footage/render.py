@@ -5,10 +5,12 @@ black and out to black over `metadata["footage"]["fades"]` seconds ([in, out], d
 whole edit is printed in one look (grade.py): the timeline's `metadata["footage"]["look"]`, or `--look`, or the default; the master
 is written beside the timeline as "EDIT - LOOK.mp4", so one edit can be rendered in several looks. An audio clip may set
 `metadata["footage"]["lufs"]` for its loudness (dialogue -15, ambience -21).
-The frame is the largest 2.39:1 picture every clip can fill without upscaling vertically: 5162x2160 for 4K 1.6x.
-A timeline may set `metadata["footage"]["frame"]` to "full" for the whole recorded frame, desqueezed,
-`["height"]` for a smaller master, and `["crf"]` (the encoder's quantizer, default 18) for a
-smaller file: a documentation copy is {"look": "natural", "frame": "full", "height": 1080, "crf": 30, "fades": [0, 0]}.
+The master's aspect is the timeline's `metadata["footage"]["aspect"]`: a number (2.39 unless it says), or "full" for
+the first shot's whole recorded frame, desqueezed. Its size is the largest frame of that aspect every clip can fill
+unframed without upscaling vertically: 5162x2160 at 2.39 for 4K 1.6x. Each clip shows its window of the frame
+(view.py): its `metadata["footage"]["framing"]` turns it in quarter turns, moves the window and pushes in. A timeline
+may set `["height"]` for a smaller master, and `["crf"]` (the encoder's quantizer, default 18) for a smaller file: a
+documentation copy is {"look": "natural", "aspect": "full", "height": 1080, "crf": 30, "fades": [0, 0]}.
 A clip whose media reference is a GeneratorReference of kind "title" is a title card: its `text` on black, fading in
 and out, with optional `size` (share of the frame height), `font` (a fontconfig name) and `fade` (seconds).
 
@@ -82,19 +84,20 @@ def retime(sc: dict, start: float, dur: float) -> str | None:
     return smooth.filters(points, start, dur, sc["facts"]["fps"]) if points else None
 
 
-def decode(clip: Path, sc: dict, start: float, frames: int, eased: str = "", full: bool = False):
-    """A shot's frames in recorded pixels, framed (the 2.39:1 window, or the whole frame), as RGB code values on the
+def decode(clip: Path, sc: dict, start: float, frames: int, eased: str = "", win: view.Window | None = None):
+    """A shot's frames in recorded pixels, cropped to its window (view.window) and turned, as RGB code values on the
     GPU (picture.frames). ffmpeg hands them over in the file's own YUV, unconverted. The GPU decodes a camera clip
     (NVDEC); a developed RAW picture (8K 4:4:4) is decoded on the CPU."""
-    cw, ch = (sc["facts"]["width"], sc["facts"]["height"]) if full else view.window(sc)
+    x, y, cw, ch, turn = win or view.window(sc)
     fps = float(Fraction(sc["facts"]["fps"]))
     fmt, full_range = ("yuv444p12le", True) if develop.raw(sc) else (sc["facts"]["pix_fmt"], sc["facts"]["color_range"] == "pc")
     cmd = [FFMPEG, "-v", "error", *([] if develop.raw(sc) else ["-hwaccel", "cuda"]), "-threads", "8",
            "-ss", f"{start:.3f}", "-t", f"{frames / fps + 1:.3f}", "-i", view.source(clip, sc),
-           "-vf", f"trim=end_frame={frames},setpts=PTS-STARTPTS,{eased}crop={cw}:{ch},"
+           "-vf", f"trim=end_frame={frames},setpts=PTS-STARTPTS,{eased}crop={cw}:{ch}:{x}:{y},"
                   f"tpad=stop_mode=clone:stop=2,trim=end_frame={frames}",
            "-pix_fmt", fmt, "-frames:v", str(frames), "-f", "rawvideo", "-"]
-    return picture.frames(cmd, (cw, ch), fmt, full_range)
+    pictures = picture.frames(cmd, (cw, ch), fmt, full_range)
+    return (f.rot90(-turn, (1, 2)) for f in pictures) if turn else pictures
 
 
 def encoder(timeline: otio.schema.Timeline, size: tuple[int, int], rate: str, total: float, fade_out: float,
@@ -131,11 +134,9 @@ def render(edit: Path, name: str | None = None) -> Path:
     total = timeline.duration().to_seconds()
     pictures = [(p, read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
-    full = settings.get("frame") == "full"
-    h = settings.get("height") or view.master(filmed)[1]
-    if full and len({round(view.full_width(sc), 3) for sc in filmed}) > 1:
-        raise SystemExit("a full-frame render needs clips of one shape")
-    size = (round(h * (view.full_width(filmed[0]) if full else view.ASPECT) / 2) * 2, h)
+    aspect = view.aspect(settings.get("aspect", view.ASPECT), filmed)
+    h = settings.get("height") or view.master(filmed, aspect)[1]
+    size = (round(h * aspect / 2) * 2, h)
     rate = filmed[0]["facts"]["fps"]
     fps = float(Fraction(rate))
     print(f"  {len(pictures)} shots at {size[0]}x{size[1]} in {look.name}", flush=True)
@@ -159,7 +160,8 @@ def render(edit: Path, name: str | None = None) -> Path:
             eased = retime(sc, start, dur.to_seconds()) or ""
             if eased:
                 print(f"  {clip.stem}: retimed focus pull", flush=True)
-            source, grading = decode(clip, sc, start, n, eased, full), picture.shot(sc, look, size)
+            win = view.window(sc, item.metadata.get("footage", {}).get("framing"), aspect)
+            source, grading = decode(clip, sc, start, n, eased, win), picture.shot(sc, look, size, win.turn)
         for frame in source:
             t = done / fps
             fade = min(1.0, t / fade_in if fade_in else 1.0, (total - t) / fade_out if fade_out else 1.0)

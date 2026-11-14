@@ -159,12 +159,13 @@ class Shot:
                                  self.gain, self.mask, self.spread)
 
 
-def shot(sc: dict, look: grade.Look, size: tuple[int, int]) -> Shot:
+def shot(sc: dict, look: grade.Look, size: tuple[int, int], turn: int = 0) -> Shot:
+    """A shot's grade at `size`. A lens's vignette is an oval as wide as the squeeze, and it turns with the shot."""
     from . import view
     source, gain = grade.halation(sc, look) if look.halation else (None, None)
     return Shot(size, tensor(grade.print_lut(sc, look)), None if source is None else tensor(source),
                 None if gain is None else tensor(gain), size[1] * look.halation_spread / 4,
-                tensor(grade.vignette(size, look, view.squeeze(sc))) if look.vignette else None)
+                tensor(grade.vignette(size, look, view.squeeze(sc) ** (-1 if turn % 2 else 1))) if look.vignette else None)
 
 
 def ahead(items, n: int = AHEAD):

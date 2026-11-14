@@ -63,9 +63,11 @@ it stops, and search leaves it out and says how many clips it skipped sections o
 
    ffmpeg decodes each shot (NVDEC), the GPU desqueezes, grades and adds the halation in a few fused kernels
    (torch.compile), and the GPU's HEVC encoder writes the master through Vulkan video. A render holds a few frames at
-   a time however long the edit is, and stills go through the same path. The master is 10-bit HEVC at the largest 2.39:1 frame the footage supports (5162x2160 for 4K 1.6x anamorphic).
+   a time however long the edit is, and stills go through the same path. The master is 10-bit HEVC at the largest frame of the edit's aspect the footage supports: 2.39:1 unless the timeline
+   sets `aspect` (5162x2160 for 4K 1.6x anamorphic). Each shot can be turned in quarter turns, and moved and pushed in
+   within its frame, by its `framing` (`footage/view.py`); `python tests/framing.py` checks both, in the GPU lane.
    A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
-   documentation copy of a long talk: `{"look": "natural", "frame": "full", "height": 1080, "crf": 28}`.
+   documentation copy of a long talk: `{"look": "natural", "aspect": "full", "height": 1080, "crf": 28}`.
 
 Edits are made in code: an agent writes the timeline, and the toolkit grades and renders it. A timeline can also hold title cards (an OTIO
 GeneratorReference of kind `title`) and music, and `python -m footage.music TRACK` finds a track's beats and
