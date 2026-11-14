@@ -19,9 +19,11 @@ If `footage` is missing, run the repository's `install.sh`.
 - **Card offload.** Copy each clip from the card into `~/Videos/Ingest`, check the copy byte for byte against the card
   (read back from disk, not the page cache), and run `footage` to file it. Then delete the clip from the card, but
   only once its Library copy matches the card by sha256 and size. Delete nothing else from a card.
-- **Edits are code.** You write the timeline (an OpenTimelineIO file, from a script in the edit's folder under
-  `~/Videos/Edits/`), and `footage render` grades and renders it. Never install, open or drive a desktop editor, and
-  never open a window on the user's desktop. Show results as stills (`footage render --stills`) or finished files.
+- **An edit is one file.** An OpenTimelineIO file in its folder under `~/Videos/Edits/`. The user cuts it by eye in
+  the app (`footage app EDIT.otio`); you write it in code, from a script in that folder; `footage render` grades and
+  renders it. The app reads your write in as one more undo step, so it never needs closing first. Never drive the app
+  or open any window on the user's desktop: check the app with `tests/headless.sh`. Show results as stills
+  (`footage render --stills`) or finished files.
 - **Looks.** The looks are files in the repository's `looks/`; `footage grade` lists them. A shot that reads too bright
   or dark gets `footage assume CLIP exposure=STOPS`, never a new look. A new look is a copied JSON file with new numbers.
 - **You are the describer.** `footage` writes description questions under `~/Videos/Library/.questions/`. Answer each

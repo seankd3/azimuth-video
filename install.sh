@@ -5,8 +5,8 @@
 #   1. Python: a virtual environment in .venv with the packages in setup/requirements.txt, and dlib built with CUDA.
 #   2. Programs: ffmpeg 8.1 with NVDEC and 10-bit x265 (as ffmpeg-gpu), and LibRaw built to read RAW clips over 2 GB.
 #   3. Models: each file in setup/models.txt, checked by sha256, and TitaNet-large exported from NVIDIA's release.
-#   4. Commands and skills: `footage` and `heavy` in ~/.local/bin, the heavy-job memory limit, the skills linked
-#      into Claude Code (and Codex), and a starter config.
+#   4. Commands and skills: `footage` and `heavy` in ~/.local/bin, the app in the launcher, the heavy-job memory
+#      limit, the skills linked into Claude Code (and Codex), and a starter config.
 #
 # It needs uv, curl, a C++ compiler, make and the CUDA toolkit (nvcc). Downloads are about 8 GB.
 set -euo pipefail
@@ -100,6 +100,9 @@ du -sh "$MODELS"
 
 say "Commands, memory limit and skills"
 for c in footage heavy; do sed "s|@REPO@|$REPO|" "$REPO/bin/$c" > "$BIN/$c" && chmod +x "$BIN/$c"; done
+A="$HOME/.local/share/applications"; mkdir -p "$A"
+printf '[Desktop Entry]\nType=Application\nName=Azimuth Video\nComment=Cut, trim and frame an edit\nExec=%s app %%F\nIcon=%s\nMimeType=video/mp4;video/quicktime;\nCategories=AudioVideo;Video;AudioVideoEditing;\nTerminal=false\n' \
+  "$BIN/footage" "$REPO/footage/app/icon.svg" > "$A/azimuth-video.desktop"
 mkdir -p "$HOME/.config/systemd/user" && cp "$REPO"/setup/*.slice "$HOME/.config/systemd/user/" && systemctl --user daemon-reload
 for agent in "$HOME/.claude" "$HOME/.codex"; do
   [ -d "$agent" ] || continue

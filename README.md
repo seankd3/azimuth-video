@@ -69,7 +69,8 @@ it stops, and search leaves it out and says how many clips it skipped sections o
    A timeline can ask for the whole recorded frame, a smaller height and a smaller file instead, for example a
    documentation copy of a long talk: `{"look": "natural", "aspect": "full", "height": 1080, "crf": 28}`.
 
-Edits are made in code: an agent writes the timeline, and the toolkit grades and renders it. A timeline can also hold title cards (an OTIO
+An edit is one OpenTimelineIO file. Cut it by eye in the app, or have an agent write it in code; the toolkit grades and
+renders it either way, and the app reads an agent's write in as one more undo step. A timeline can also hold title cards (an OTIO
 GeneratorReference of kind `title`) and music, and `python -m footage.music TRACK` finds a track's beats and
 loudness so cuts can land on the beat.
 
@@ -90,7 +91,18 @@ python -m footage.frame CLIP 02:05 [--out PATH.jpg]   # one desqueezed, ungraded
 python -m footage.assume 2026-10-29 squeeze=1.6   # set what the file doesn't record, for clips or whole days
 python -m footage.graded              # every clip graded on its own, in the house look; skips masters still current
 bash acceptance.sh                    # filing safety checks on a sandbox of hard links
+tests/headless.sh .venv/bin/python tests/app.py   # the app's checks, in a headless compositor on the GPU
 ```
+
+### The app
+
+`footage app [EDIT.otio | CLIP ...]` (or Azimuth Video in the launcher) opens a window on an edit, or starts a new edit
+in `~/Videos/Edits/` from clips. It plays the edit through each shot's framing and prints it in the edit's look live:
+the shot's own print LUT and the look's vignette in a shader, which is the render's picture less the halation. Split,
+trim, move and remove shots on the timeline; frame a shot with **F** (drag the window, scroll to push in, **R** to
+turn); pick the edit's aspect and look in the bar; **Render** runs `footage render` in the GPU lane, and the render
+outlives the window. Every change is written to the edit as it is made, so there is nothing to save. **?** lists the
+keys, which match Omacut's where the two do the same thing.
 
 The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the library. A layout that stays tidy:
 
