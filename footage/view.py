@@ -10,6 +10,7 @@ optional. The window is the largest rectangle of the edit's aspect that fits in 
 shows its whole height or width: the 2.39:1 window, as shot. `frame` is the one door to a valid framing: the app stores
 what it returns, and the render reads every framing through it, so a hand-written edit renders as the app shows it.
 """
+import math
 from pathlib import Path
 from typing import NamedTuple
 
@@ -17,6 +18,7 @@ from . import develop
 
 ASPECT = 2.39  # an edit's aspect unless it sets one: a number, or "full" for its first shot's whole frame
 ZOOM = (1.0, 8.0)  # a shot is pushed in at most 8x
+PLACES = 6  # decimals a framing keeps: a millionth of the frame, far under a pixel
 # Where a point of the turned frame (x, y) was before the turn, in a frame w x h: one clockwise quarter turn per row.
 UNTURN = (lambda x, y, w, h: (x, y), lambda x, y, w, h: (y, h - x),
           lambda x, y, w, h: (w - x, h - y), lambda x, y, w, h: (w - y, x))
@@ -79,13 +81,17 @@ def fitted(sc: dict, turn: int, aspect: float, zoom: float) -> tuple[float, floa
 
 def frame(sc: dict, framing: dict | None, aspect: float) -> dict:
     """A shot's framing made valid for an edit of `aspect`: a quarter turn, a zoom in ZOOM, and the window inside the
-    frame. Idempotent."""
+    frame. Idempotent, also through an edit file: the values are kept to PLACES decimals (the centre's limits rounded
+    inward), which JSON carries exactly, so a framing read back from a file is still what this returns."""
     f = framing or {}
-    turn, zoom = int(f.get("turn", 0)) % 4, min(max(float(f.get("zoom", 1)), ZOOM[0]), ZOOM[1])
+    turn, zoom = int(f.get("turn", 0)) % 4, round(min(max(float(f.get("zoom", 1)), ZOOM[0]), ZOOM[1]), PLACES)
     (fw, fh), (w, h) = turned(sc, turn), fitted(sc, turn, aspect, zoom)
+    k = 10 ** PLACES
+
+    def inside(c: float, half: float) -> float:
+        return min(max(round(float(c), PLACES), math.ceil(half * k) / k), math.floor((1 - half) * k) / k)
     cx, cy = f.get("center", (0.5, 0.5))
-    return {"turn": turn, "center": [min(max(cx, w / 2 / fw), 1 - w / 2 / fw), min(max(cy, h / 2 / fh), 1 - h / 2 / fh)],
-            "zoom": zoom}
+    return {"turn": turn, "center": [inside(cx, w / 2 / fw), inside(cy, h / 2 / fh)], "zoom": zoom}
 
 
 def window(sc: dict, framing: dict | None = None, aspect: float = ASPECT) -> Window:

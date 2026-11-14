@@ -2,10 +2,14 @@
 import os
 
 # GPU work runs only in gpu.slice, the slice of heavy's media lane: anywhere else reclaim and swap can stall the GPU
-# driver the desktop draws through. Outside it the GPU is not there, so a tool takes its CPU path.
+# driver the desktop draws through. Outside it the GPU is not there, so a tool takes its CPU path. Whether it is there
+# follows the slice this process runs in, not its parent's: a job heavy starts from a tool outside the lane (the app's
+# render) inherits the hidden GPU, and gets it back here.
 GPU_LANE = "/gpu.slice/" in open("/proc/self/cgroup").read()
 if not GPU_LANE:
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
+elif os.environ.get("CUDA_VISIBLE_DEVICES") == "":
+    del os.environ["CUDA_VISIBLE_DEVICES"]
 
 
 def idle() -> None:
