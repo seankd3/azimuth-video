@@ -31,7 +31,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Property, QFileSystemWatcher, QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication
-from PySide6.QtQml import QQmlEngine, qmlRegisterSingletonInstance
+from PySide6.QtQml import QQmlEngine, qmlRegisterSingletonType
 
 HERE = Path(__file__).resolve().parent  # <bundle>/qml/Azimuth
 URI = "Azimuth"
@@ -281,7 +281,10 @@ def setup(picked: str | None = None, on_pick=None, bundle: Path | None = None) -
     global _theme
     if _theme is None:
         _theme = Theme(_bundle(bundle), picked, on_pick)
-        qmlRegisterSingletonInstance(Theme, URI, 1, 0, "Theme", _theme)
+        # One Theme for every engine (a window opened twice, a test's second engine): the engines get it through a
+        # callback and never own it (an instance registration serves only one engine).
+        QQmlEngine.setObjectOwnership(_theme, QQmlEngine.ObjectOwnership.CppOwnership)
+        qmlRegisterSingletonType(Theme, URI, 1, 0, "Theme", lambda engine: _theme)
     else:
         _theme._on_pick = on_pick
         if picked:

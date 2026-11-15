@@ -19,10 +19,11 @@ Item {
     readonly property bool resizing: handleLayer.busy
 
     readonly property color dim: Theme.alpha("black", 0.6)
-    readonly property real fx: frame.x
-    readonly property real fy: frame.y
-    readonly property real fw: frame.width
-    readonly property real fh: frame.height
+    // Whole pixels, so the four dimmed sides meet without a darker seam.
+    readonly property real fx: Math.round(frame.x)
+    readonly property real fy: Math.round(frame.y)
+    readonly property real fw: Math.round(frame.x + frame.width) - fx
+    readonly property real fh: Math.round(frame.y + frame.height) - fy
 
     // The overlay's own parts are listed here, so the children an app gives it go over the picture, under the handles.
     data: [
