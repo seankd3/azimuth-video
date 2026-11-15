@@ -26,6 +26,9 @@ FACE_LIFT = 1.0  # most a face shot's exposure moves to put its person at their 
 WHITE = float(np.log2(0.9 / 0.18))  # diffuse white, a white wall or page, in stops above 18% grey
 VIGNETTE_FLAT = 0.35  # share of the way to the corners a vignette leaves untouched
 NIGHT = (0.005, 0.09)  # scene light where a night shot's colour is faded most, and where it is full again
+# Light at a frame's average, in EV at ISO 100, below which a shot is dark whatever its exposure: a lit room is about 7,
+# a night street 2 to 5, daylight 12 to 16 (the 8K daylight clip of 2026-11-13 measured 13.9).
+DARK_EV = 6.0
 
 
 @dataclass(frozen=True)
@@ -77,9 +80,26 @@ def target(sc: dict, look: Look) -> float:
     return look.exposure + look.key * 2 * k - avg
 
 
+def light(sc: dict) -> float | None:
+    """The scene's light at the frame's average, in EV at ISO 100: the exposure the camera recorded (ISO, shutter and
+    aperture) plus how far the average sits above grey. None when the file doesn't hold all three, as with a manual
+    lens, whose aperture the camera never knows."""
+    n = sc["facts"].get("notes") or {}
+    if not (n.get("iso") and n.get("exposure_time") and n.get("f_number")):
+        return None
+    ev = np.log2(n["f_number"] ** 2 / n["exposure_time"]) - np.log2(n["iso"] / 100)
+    return float(ev + sc["measured"]["exposure_stops"])
+
+
 def dark(sc: dict, look: Look) -> bool:
-    """Whether the look shows this shot as a dark one: as exposed, for its lit part, rather than brightened."""
-    return look.dark is not None and target(sc, look) > 0
+    """Whether the look shows this shot as a dark one: as exposed, for its lit part, rather than brightened. The
+    scene's own light decides where the file records it; otherwise the frame's average under the look's exposure.
+    Not `target`: a look that keeps the scene's key brightens a bright, high-key frame, and a blue daylight sky was
+    once taken for night that way and pulled down 1.4 stops."""
+    if look.dark is None:
+        return False
+    ev = light(sc)
+    return ev < DARK_EV if ev is not None else sc["measured"]["exposure_stops"] < look.exposure
 
 
 def exposure(sc: dict, look: Look) -> tuple[float, float]:
