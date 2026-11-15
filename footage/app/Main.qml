@@ -73,7 +73,7 @@ ApplicationWindow {
         const next = direction > 0 ? edges.find(e => e > playhead + 0.01) : edges.slice().reverse().find(e => e < playhead - 0.01)
         if (next !== undefined) step(next - playhead)
     }
-    // The shot under the playhead starts or ends here.
+    // [ and ]: the shot under the playhead starts or ends here.
     function trimHere(end) {
         const s = shots[current]
         if (!s) return
@@ -86,6 +86,7 @@ ApplicationWindow {
         if (help.opened) help.close()
         else if (framing) editor.cancel()
         else if (viewer.mode !== "fit") viewer.zoomTo("fit")
+        else if (win.visibility === Window.FullScreen) win.showNormal()
     }
 
     Connections {
@@ -120,33 +121,33 @@ ApplicationWindow {
     function openEdit() { openDialog.adding = false; openDialog.open() }
     function addClips() { openDialog.adding = true; openDialog.open() }
 
-    // Keys. The same keys as Omacut where the two do the same thing.
+    // Keys: the Azimuth keymap (the same key, the same verb, in every app), and Video's own where the map has none.
     Shortcut { sequence: "Space"; onActivated: win.playing ? win.pause() : win.play() }
-    Shortcut { sequence: "Left"; onActivated: win.step(-1) }
-    Shortcut { sequence: "Right"; onActivated: win.step(1) }
-    Shortcut { sequence: "Shift+Left"; onActivated: win.step(-5) }
-    Shortcut { sequence: "Shift+Right"; onActivated: win.step(5) }
-    Shortcut { sequence: "Alt+Left"; autoRepeat: true; onActivated: win.frames(-1) }
-    Shortcut { sequence: "Alt+Right"; autoRepeat: true; onActivated: win.frames(1) }
-    Shortcut { sequence: "["; onActivated: win.edge(-1) }
-    Shortcut { sequence: "]"; onActivated: win.edge(1) }
+    Shortcut { sequence: "Left"; autoRepeat: true; onActivated: win.frames(-1) }
+    Shortcut { sequence: "Right"; autoRepeat: true; onActivated: win.frames(1) }
+    Shortcut { sequence: "Shift+Left"; autoRepeat: true; onActivated: win.frames(-10) }
+    Shortcut { sequence: "Shift+Right"; autoRepeat: true; onActivated: win.frames(10) }
+    Shortcut { sequence: "Alt+Left"; autoRepeat: true; onActivated: win.step(-1) }
+    Shortcut { sequence: "Alt+Right"; autoRepeat: true; onActivated: win.step(1) }
+    Shortcut { sequence: "Up"; onActivated: win.edge(-1) }
+    Shortcut { sequence: "Down"; onActivated: win.edge(1) }
+    Shortcut { sequence: "["; onActivated: win.framing ? editor.turn(-1) : win.trimHere("in") }
+    Shortcut { sequence: "]"; onActivated: win.framing ? editor.turn(1) : win.trimHere("out") }
     Shortcut { sequence: "S"; onActivated: if (win.shots.length) backend.split(win.current, win.playhead - win.shots[win.current].at) }
     Shortcut { sequences: ["X", "Delete"]; onActivated: if (win.shots.length) backend.remove(win.current) }
     Shortcut { sequence: "Alt+["; onActivated: if (win.current > 0) backend.move(win.current, win.current - 1) }
     Shortcut { sequence: "Alt+]"; onActivated: if (win.current + 1 < win.shots.length) backend.move(win.current, win.current + 1) }
-    Shortcut { sequence: "Ctrl+Space"; onActivated: win.trimHere("in") }
-    Shortcut { sequence: "Ctrl+Shift+Space"; onActivated: win.trimHere("out") }
     Shortcut { sequences: [StandardKey.Undo]; onActivated: backend.undo() }
     Shortcut { sequences: [StandardKey.Redo, "Ctrl+Shift+Z"]; onActivated: backend.redo() }
-    Shortcut { sequence: "F"; onActivated: win.framing ? editor.apply() : editor.open() }
-    Shortcut { sequence: "R"; enabled: win.framing; onActivated: editor.turn(1) }
-    Shortcut { sequence: "Shift+R"; enabled: win.framing; onActivated: editor.turn(-1) }
+    Shortcut { sequence: "R"; onActivated: win.framing ? editor.apply() : editor.open() }
+    Shortcut { sequences: ["Return", "Enter"]; enabled: win.framing && !help.opened; onActivated: editor.apply() }
     Shortcut { sequence: "Escape"; enabled: !help.opened; onActivated: win.back() }
-    Shortcut { sequence: "G"; onActivated: win.graded = !win.graded }
+    Shortcut { sequence: "\\"; onActivated: win.graded = !win.graded }
     Shortcut { sequence: "Z"; onActivated: timeline.zoomToShot() }
+    Shortcut { sequence: "F"; onActivated: win.visibility === Window.FullScreen ? win.showNormal() : win.showFullScreen() }
     Shortcut { sequence: "Ctrl+O"; onActivated: win.openEdit() }
     Shortcut { sequence: "Ctrl+Shift+O"; onActivated: win.addClips() }
-    Shortcut { sequence: "Ctrl+R"; onActivated: backend.render() }
+    Shortcut { sequence: "Ctrl+E"; onActivated: backend.render() }
     Shortcut { sequence: "Q"; onActivated: Qt.quit() }
     Shortcut { sequences: ["?", "Shift+?"]; onActivated: help.opened ? help.close() : help.open() }
 
@@ -176,12 +177,12 @@ ApplicationWindow {
                 onActivated: i => backend.setLook(backend.looks[i])
                 Az.Tip { text: "Look"; visible: lookBox.hovered && !lookBox.popup.visible }
             }
-            Az.Button { text: "Graded"; checkable: true; checked: win.graded; onToggled: win.graded = checked; tip: "Graded or log · G" }
+            Az.Button { text: "Graded"; checkable: true; checked: win.graded; onToggled: win.graded = checked; tip: "Graded or log · \\" }
             Az.Button {
                 text: "Frame"; icon.name: "crop"; checkable: true; checked: win.framing
                 enabled: !!(win.shots[win.current] || {}).path
                 onToggled: checked ? editor.open() : editor.apply()
-                tip: "Frame the shot · F"
+                tip: "Frame the shot · R"
             }
             Item { implicitWidth: 4 }
             Az.Button { icon.name: "undo"; enabled: backend.canUndo; onClicked: backend.undo(); tip: "Undo · Ctrl+Z" }
@@ -202,7 +203,7 @@ ApplicationWindow {
                 text: busy ? "Rendering " + Math.round(backend.progress * 100) + "%" : "Render"
                 enabled: !!backend.name
                 onClicked: if (!busy) backend.render()
-                tip: busy ? "" : "Render · Ctrl+R"
+                tip: busy ? "" : "Render · Ctrl+E"
             }
         }
 
@@ -379,8 +380,8 @@ ApplicationWindow {
                         }
 
                         bar: [
-                            Az.Button { small: true; icon.name: "rotate-left"; tip: "Turn left · Shift+R"; onClicked: editor.turn(-1) },
-                            Az.Button { small: true; icon.name: "rotate-right"; tip: "Turn right · R"; onClicked: editor.turn(1) },
+                            Az.Button { small: true; icon.name: "rotate-left"; tip: "Turn left · ["; onClicked: editor.turn(-1) },
+                            Az.Button { small: true; icon.name: "rotate-right"; tip: "Turn right · ]"; onClicked: editor.turn(1) },
                             Az.Label {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 64; horizontalAlignment: Text.AlignHCenter
@@ -430,9 +431,9 @@ ApplicationWindow {
                         Az.Segmented {
                             enabled: win.shots.length > 0
                             currentIndex: -1
-                            model: [{ icon: "step-back", tip: "Previous cut · [" },
+                            model: [{ icon: "step-back", tip: "Previous cut · ↑" },
                                     { icon: win.playing ? "pause" : "play", tip: (win.playing ? "Pause" : "Play") + " · Space" },
-                                    { icon: "step-forward", tip: "Next cut · ]" }]
+                                    { icon: "step-forward", tip: "Next cut · ↓" }]
                             onActivated: i => i === 1 ? (win.playing ? win.pause() : win.play()) : win.edge(i === 0 ? -1 : 1)
                         }
                         Az.Timecode { seconds: win.playhead; fps: win.fps }
@@ -472,18 +473,19 @@ ApplicationWindow {
         title: "Cut, trim and frame"
         readonly property var keys: [
             [["Space"], "Play or pause"],
-            [["←", "→"], "One second; with Shift, five; with Alt, a frame"],
-            [["[", "]"], "The previous or next cut"],
+            [["←", "→"], "One frame; with Shift, ten; with Alt, a second"],
+            [["↑", "↓"], "The previous or next cut"],
+            [["[", "]"], "The shot starts or ends at the playhead"],
             [["S"], "Split the shot at the playhead"],
             [["X"], "Remove the shot"],
             [["Alt", "[", "]"], "Move the shot earlier or later"],
-            [["Ctrl", "Space"], "The shot starts here; with Shift, it ends here"],
-            [["F"], "Frame the shot: drag, scroll or pull a handle; R turn; Esc cancel"],
-            [["G"], "Graded or log"],
+            [["R"], "Frame the shot: drag, scroll or pull a handle; [ ] turn; ⏎ apply; Esc cancel"],
+            [["\\"], "Graded or log"],
             [["Z"], "Fit the timeline to the shot"],
+            [["F"], "Full screen"],
             [["Ctrl", "Z"], "Undo; with Shift, redo"],
             [["Ctrl", "O"], "Open; with Shift, add clips"],
-            [["Ctrl", "R"], "Render"],
+            [["Ctrl", "E"], "Render"],
             [["Q"], "Quit"]
         ]
         Repeater {
