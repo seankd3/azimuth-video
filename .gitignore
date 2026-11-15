@@ -11,3 +11,5 @@ __pycache__/
 !looks/*.json
 *.transcript.*
 !setup/*.json
+# The vendored design system (themes, tokens, icons) is code, not data.
+!footage/app/azimuth/**/*.json

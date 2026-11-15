@@ -1,0 +1,43 @@
+{
+  "format": 1,
+  "name": "Azimuth Dark",
+  "id": "azimuth-dark",
+  "source": "built-in",
+  "mode": "dark",
+  "font": {
+    "sans": "Inter Tight",
+    "mono": "JetBrains Mono"
+  },
+  "colors": {
+    "canvas": "#030304",
+    "panel": "#0e0e10",
+    "panel-raised": "#18181b",
+    "float": "#212124",
+    "well": "#08080a",
+    "stage": "#030303",
+    "tile": "#1e1e1e",
+    "line": "#272729",
+    "line-strong": "#454546",
+    "line-hover": "#6e6e6f",
+    "text": "#f2f2f2",
+    "text-2": "#a0a0a6",
+    "text-3": "#7b7b7c",
+    "accent": "#eef0f2",
+    "accent-ink": "#0b0b0c",
+    "accent-tint": "#323234",
+    "focus": "#eef0f2",
+    "row-hover": "#19191b",
+    "row-active": "#232324",
+    "selection": "#2c2d31",
+    "pick": "#f28c3c",
+    "go": "#62b58b",
+    "go-ink": "#0b0b0c",
+    "reject": "#e5696d",
+    "reject-ink": "#0b0b0c",
+    "reject-tint": "#2c1b1d",
+    "warn": "#dba253",
+    "info": "#76a9ea",
+    "pending": "#2c2c2d",
+    "on-photo": "#f2f2f2"
+  }
+}

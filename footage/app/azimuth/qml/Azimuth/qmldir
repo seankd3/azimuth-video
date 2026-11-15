@@ -1,0 +1,33 @@
+module Azimuth
+# The Azimuth Qt Quick kit. Theme (the singleton) is registered from Python by azimuth_qt.install().
+Badge 1.0 Badge.qml
+Brand 1.0 Brand.qml
+Button 1.0 Button.qml
+Checkbox 1.0 Checkbox.qml
+Clip 1.0 Clip.qml
+Dialog 1.0 Dialog.qml
+EmptyState 1.0 EmptyState.qml
+Field 1.0 Field.qml
+Float 1.0 Float.qml
+FocusRing 1.0 FocusRing.qml
+FrameOverlay 1.0 FrameOverlay.qml
+Icon 1.0 Icon.qml
+KeyCap 1.0 KeyCap.qml
+Label 1.0 Label.qml
+Mark 1.0 Mark.qml
+Notice 1.0 Notice.qml
+Panel 1.0 Panel.qml
+PanelHead 1.0 PanelHead.qml
+Playhead 1.0 Playhead.qml
+Progress 1.0 Progress.qml
+Segmented 1.0 Segmented.qml
+Select 1.0 Select.qml
+Slider 1.0 Slider.qml
+StatusChip 1.0 StatusChip.qml
+Switch 1.0 Switch.qml
+Timecode 1.0 Timecode.qml
+TimelineRuler 1.0 TimelineRuler.qml
+Tip 1.0 Tip.qml
+Toast 1.0 Toast.qml
+TopBar 1.0 TopBar.qml
+ZoomChip 1.0 ZoomChip.qml
