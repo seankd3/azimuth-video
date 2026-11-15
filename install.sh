@@ -8,7 +8,7 @@
 #   4. Commands and skills: `footage` and `heavy` in ~/.local/bin, the app in the launcher, the heavy-job memory
 #      limit, the skills linked into Claude Code (and Codex), and a starter config.
 #
-# It needs uv, curl, a C++ compiler, make and the CUDA toolkit (nvcc). Downloads are about 8 GB.
+# It needs uv, curl, exiftool, a C++ compiler, make and the CUDA toolkit (nvcc). Downloads are about 8 GB.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")" && pwd)"
 DATA="$HOME/.local/share/footage"
@@ -18,6 +18,7 @@ say() { printf '\n== %s\n' "$*"; }
 need() { command -v "$1" > /dev/null || { echo "install.sh needs $1: $2" >&2; exit 1; }; }
 case "$(uname -m)" in aarch64) FFARCH=linuxarm64;; x86_64) FFARCH=linux64;; *) echo "unsupported machine: $(uname -m)" >&2; exit 1;; esac
 need uv "https://docs.astral.sh/uv/"; need curl "your package manager"; need make "your package manager"; need c++ "your package manager"
+need exiftool "your package manager (perl-image-exiftool on Arch): it reads the camera's notes in each clip"
 NVCC=$(command -v nvcc || ls /opt/cuda/bin/nvcc /usr/local/cuda/bin/nvcc 2>/dev/null | head -1 || true)
 [ -n "$NVCC" ] || { echo "install.sh needs the CUDA toolkit (nvcc) to build dlib for the GPU" >&2; exit 1; }
 mkdir -p "$VENDOR" "$BIN"

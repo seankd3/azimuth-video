@@ -10,6 +10,10 @@ from pathlib import Path
 from . import config
 
 VIDEO = {".mp4", ".mov", ".crm"}  # .crm: Canon Cinema RAW Light, read through develop.py
+# A camera writes its own notes (lens, log, how it was held) at the front of a clip: in every Canon clip read so far,
+# MP4 and an 8K RAW of 107 GB alike, they sat in the first 8 MB, so a clip is never read whole to learn them.
+HEAD = 8 << 20
+LOGS = {0: None, 1: "Canon Log", 2: "Canon Log 2", 3: "Canon Log 3"}  # the camera's CanonLogVersion: 0 is log off
 
 
 def is_video(p: Path) -> bool:
@@ -88,6 +92,28 @@ def camera(p: Path, tags: dict) -> str | None:
     return " ".join(x for x in (make, model) if x) or None
 
 
+def notes(p: Path) -> dict:
+    """What the camera's own notes in the file say about the shot, None where they say nothing. lens: the lens's name,
+    "" when no electronic lens was on the camera; canon_log: the CanonLogVersion recorded; roll: degrees the camera was
+    rolled about its lens, as its level sensor read it; iso, exposure_time (s) and f_number: the exposure as set (a
+    manual lens's aperture is unknown to the camera); measured_ev: the light the camera's meter read."""
+    with open(p, "rb") as f:
+        head = f.read(HEAD)
+        os.posix_fadvise(f.fileno(), 0, len(head), os.POSIX_FADV_DONTNEED)
+    names = {"lens": "LensModel", "canon_log": "CanonLogVersion", "roll": "RollAngle", "iso": "ISO",
+             "exposure_time": "ExposureTime", "f_number": "FNumber", "measured_ev": "MeasuredEV"}
+    out = subprocess.run(["exiftool", "-j", "-n", *(f"-{t}" for t in names.values()), "-"], input=head,
+                         capture_output=True, check=True).stdout
+    tags = json.loads(out)[0]
+
+    def told(k: str):
+        v = tags.get(names[k])
+        if k in ("iso", "exposure_time", "f_number"):  # an exposure the camera left to itself reads "undef" or 0
+            return v if isinstance(v, (int, float)) and v > 0 else None
+        return None if v == "undef" else v
+    return {k: told(k) for k in names}
+
+
 def facts(p: Path) -> dict:
     info = ffprobe(p)
     fmt = info["format"]
@@ -113,6 +139,7 @@ def facts(p: Path) -> dict:
         "color_space": v.get("color_space"),
         "color_transfer": v.get("color_transfer"),
         "color_primaries": v.get("color_primaries"),
+        "notes": notes(p),
     }
 
 
@@ -124,10 +151,25 @@ def unchanged(p: Path, f: dict) -> bool:
 
 
 def assumed(f: dict) -> dict:
-    """What the file doesn't say about itself (lens squeeze, log curve, gamut), from the first camera rule in the site
-    config whose model prefix matches. Edit the sidecar to override one clip."""
-    for rule in config.load().get("cameras", []):
-        if (f["camera"] or "").startswith(rule["model_prefix"]):
-            return {"squeeze": rule.get("squeeze"), "log": rule.get("log"), "gamut": rule.get("gamut"),
-                    "by": f"camera rule: {rule['model_prefix']}"}
-    return {"squeeze": None, "log": None, "gamut": None, "by": "no camera rule: set squeeze with python -m footage.assume"}
+    """What the toolkit takes the clip to be: lens squeeze, log curve and gamut. The file's own notes come first; a camera
+    rule in the site config (the first whose model prefix matches) fills only what the file doesn't say. `by` names
+    the source of each. Edit the sidecar (python -m footage.assume) to override one clip.
+
+    A named lens is an electronic one, and every anamorphic lens in use is manual, so a named lens is spherical. No
+    log recorded (CanonLogVersion 0) is the camera's Rec.709 video, which has no separate gamut."""
+    n = f.get("notes") or {}
+    rule = next((r for r in config.load().get("cameras", []) if (f["camera"] or "").startswith(r["model_prefix"])), None)
+    ruled = f"camera rule: {rule['model_prefix']}" if rule else "no camera rule"
+    rule = rule or {}
+    if n.get("canon_log") in LOGS:
+        log, log_by = LOGS[n["canon_log"]], f"file: CanonLogVersion {n['canon_log']}"
+    else:
+        log, log_by = rule.get("log"), ruled
+    if n.get("lens"):
+        squeeze, squeeze_by = 1.0, f"file: lens {n['lens']}"
+    else:
+        squeeze, squeeze_by = rule.get("squeeze"), ruled
+    if squeeze is None:
+        squeeze_by += ": set squeeze with python -m footage.assume"
+    gamut, gamut_by = (rule.get("gamut"), ruled) if log else (None, log_by)
+    return {"squeeze": squeeze, "log": log, "gamut": gamut, "by": {"squeeze": squeeze_by, "log": log_by, "gamut": gamut_by}}

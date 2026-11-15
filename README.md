@@ -131,7 +131,7 @@ git clone https://github.com/seankd3/azimuth-video ~/Projects/azimuth-video && ~
 ```
 
 `install.sh` sets up everything on a Linux machine (ARM64 or x86-64) with an NVIDIA GPU, and brings an install up to
-date when run again. It needs uv, curl, a C++ compiler, make and the CUDA toolkit; it downloads about 8 GB.
+date when run again. It needs uv, curl, exiftool, a C++ compiler, make and the CUDA toolkit; it downloads about 8 GB.
 
 - Python 3.12 in `.venv`, with the packages in `setup/requirements.txt`: torch and onnxruntime-gpu run the models on
   the GPU, and dlib is built with CUDA so its face detector does too.
@@ -172,7 +172,13 @@ Settings for your own footage live outside the repository, in `~/.config/azimuth
   describer redoes every description.
 - `look` is the house look: every render and still uses it, so every clip is printed the same way, unless a timeline's
   `metadata["footage"]["look"]` or `--look` names another. Each shot still gets its own white balance and exposure first.
-- Without a matching camera rule, a clip's squeeze is unknown. Set it with `python -m footage.assume CLIP squeeze=1.6`.
+- The camera's own notes in the file come first: whether log was on (Canon's `CanonLogVersion`), the lens, and how the
+  camera was held (its roll). A camera rule fills only what the file doesn't say, so it is the rule for a manual lens
+  (one the camera can't name, such as an anamorphic): a named lens is spherical, and log off is Rec.709 video.
+  `assumed.by` in the sidecar says where each value came from. A clip shot with the camera on its side is turned
+  upright unless a framing turns it otherwise, and an edit with no aspect of its own is 2.39:1, or its first shot's
+  whole frame when that is narrower (16:9, vertical).
+- Without a matching camera rule, a manual lens's squeeze is unknown. Set it with `python -m footage.assume CLIP squeeze=1.6`.
   Change sidecars through `footage.assume` rather than by hand: it waits for any write in progress, so nothing is lost.
 - White balance trusts the camera's own balance and corrects only what the frame's near-grey surfaces show.
   The evidence is `measured.neutral_gate` (the tightest chroma limit reached) and `neutral_share` (the share of

@@ -13,7 +13,8 @@ The file is `~/.config/azimuth-video/config.json`, or the path in AZIMUTH_VIDEO_
 
 `describer` names who answers the description questions (see describe.py). Without a timezone, shooting days follow
 the system's local time. `look` is the house look (a file in looks/) that every render and still uses unless a timeline
-or --look names another; without it, cinema-glow. Without a camera rule, a clip's squeeze is unknown until you set it with
+or --look names another; without it, cinema-glow. A camera rule fills only what a clip's file doesn't say (probe.assumed):
+the squeeze of a manual lens, and the gamut of log. Without one, a manual lens's squeeze is unknown until you set it with
 python -m footage.assume.
 `theme` is the app's look: "system" (the live Omarchy theme, else dark or light as the system is), "azimuth-dark" or
 "azimuth-light". The app writes it when the theme is picked in its window (`save`).

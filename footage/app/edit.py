@@ -35,10 +35,9 @@ def facts(path: Path) -> dict:
 
 
 def aspect(t: otio.schema.Timeline) -> float:
-    """The edit's aspect as a number. "full" in an edit with no filmed shot yet is the default."""
-    value = t.metadata.get("footage", {}).get("aspect", view.ASPECT)
+    """The edit's aspect as a number (view.aspect): its setting, or what its first filmed shot gives."""
     first = next((p for c in picture(t).find_clips(shallow_search=True) if (p := media(c))), None)
-    return view.aspect(value, [facts(first)]) if first else float(view.ASPECT if value == "full" else value)
+    return view.aspect(t.metadata.get("footage", {}).get("aspect"), [facts(first)] if first else [])
 
 
 def valid(t: otio.schema.Timeline) -> None:

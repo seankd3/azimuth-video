@@ -6,9 +6,11 @@ RAW clip its developed picture (develop.py).
 
 A shot's framing is what a person chose: {"turn": quarter turns clockwise, "center": [x, y], "zoom": z}, each key
 optional. The window is the largest rectangle of the edit's aspect that fits in the turned, desqueezed frame, made
-1/zoom as large and centred on `center` (fractions of that frame). With no framing a shot is not turned, is centred and
-shows its whole height or width: the 2.39:1 window, as shot. `frame` is the one door to a valid framing: the app stores
-what it returns, and the render reads every framing through it, so a hand-written edit renders as the app shows it.
+1/zoom as large and centred on `center` (fractions of that frame). With no framing a shot is turned upright (the way
+the camera was held, from its level sensor), is centred and shows its whole height or width. An edit with no aspect
+of its own is 2.39:1, or its first shot's whole upright frame when that is narrower. `frame` is the one door to a
+valid framing: the app stores what it returns, and the render reads every framing through it, so a hand-written
+edit renders as the app shows it.
 """
 import math
 from pathlib import Path
@@ -16,7 +18,7 @@ from typing import NamedTuple
 
 from . import develop
 
-ASPECT = 2.39  # an edit's aspect unless it sets one: a number, or "full" for its first shot's whole frame
+ASPECT = 2.39  # an edit's widest aspect unless it sets one: a number, or "full" for its first shot's whole frame
 ZOOM = (1.0, 8.0)  # a shot is pushed in at most 8x
 PLACES = 6  # decimals a framing keeps: a millionth of the frame, far under a pixel
 # Where a point of the turned frame (x, y) was before the turn, in a frame w x h: one clockwise quarter turn per row.
@@ -61,9 +63,27 @@ def full_width(sc: dict) -> float:
     return f["width"] * squeeze(sc) / f["height"]
 
 
+def upright(sc: dict) -> int:
+    """The clockwise quarter turns that stand a clip upright: the camera's roll as it recorded it, to the nearest
+    quarter. A camera held on its side for a vertical shot records about -90 degrees, and turns back three quarters."""
+    roll = (sc["facts"].get("notes") or {}).get("roll")
+    return round(roll / 90) % 4 if roll is not None else 0
+
+
+def whole(sc: dict) -> float:
+    """The aspect of a clip's whole desqueezed frame, standing upright."""
+    w, h = turned(sc, upright(sc))
+    return w / h
+
+
 def aspect(value, scs: list) -> float:
-    """An edit's aspect as a number: its setting, or for "full" the first shot's whole frame."""
-    return full_width(scs[0]) if value == "full" else float(value)
+    """An edit's aspect as a number: its setting; for "full" the first shot's whole upright frame; with no setting
+    ASPECT, or that whole frame when it is narrower (a 16:9 or vertical clip isn't letterboxed to 2.39 unasked)."""
+    if value not in (None, "full"):
+        return float(value)
+    if not scs:
+        return ASPECT
+    return whole(scs[0]) if value == "full" else min(ASPECT, whole(scs[0]))
 
 
 def turned(sc: dict, turn: int) -> tuple[float, float]:
@@ -84,7 +104,7 @@ def frame(sc: dict, framing: dict | None, aspect: float) -> dict:
     frame. Idempotent, also through an edit file: the values are kept to PLACES decimals (the centre's limits rounded
     inward), which JSON carries exactly, so a framing read back from a file is still what this returns."""
     f = framing or {}
-    turn, zoom = int(f.get("turn", 0)) % 4, round(min(max(float(f.get("zoom", 1)), ZOOM[0]), ZOOM[1]), PLACES)
+    turn, zoom = int(f.get("turn", upright(sc))) % 4, round(min(max(float(f.get("zoom", 1)), ZOOM[0]), ZOOM[1]), PLACES)
     (fw, fh), (w, h) = turned(sc, turn), fitted(sc, turn, aspect, zoom)
     k = 10 ** PLACES
 
@@ -106,9 +126,9 @@ def window(sc: dict, framing: dict | None = None, aspect: float = ASPECT) -> Win
 
 
 def master(scs: list, aspect: float = ASPECT) -> tuple[int, int]:
-    """The master's size: `aspect`, as tall as the shortest window any clip shows unframed, so the footage sets it and
-    no clip is upscaled vertically unless its framing pushes in or turns it."""
-    h = min(window(sc, None, aspect).h for sc in scs)
+    """The master's size: `aspect`, as tall as the shortest window any clip shows unframed (upright), so the footage
+    sets it and no clip is upscaled vertically unless its framing pushes in or turns it."""
+    h = min(w.w if w.turn % 2 else w.h for w in (window(sc, None, aspect) for sc in scs))
     return round(h * aspect / 2) * 2, h
 
 

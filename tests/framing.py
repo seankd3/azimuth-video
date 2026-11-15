@@ -4,7 +4,9 @@ A synthetic clip holds one white square at a known recorded pixel. For each sque
 shot is decoded through render.decode (the GPU path a render takes) and brought to the master's size the way
 picture.Shot does. The square must land where an independent forward turn of its position puts it, within the
 rounding of one recorded pixel. A wrong turn direction, a squeeze applied on the wrong axis or a crop placed
-before the turn would each move it across the frame. Also: the door (view.frame) is idempotent and keeps every
+before the turn would each move it across the frame. A clip whose camera was held on its side (its recorded roll)
+must come out upright with no framing at all, in a master as tall as the clip stands: a vertical clip once rendered
+sideways until a person turned it by hand. Also: the door (view.frame) is idempotent and keeps every
 window inside its frame, whatever it is given.
 
 Run inside the GPU lane: heavy -w framing-test .venv/bin/python tests/framing.py
@@ -30,9 +32,9 @@ def clip(folder: Path) -> Path:
     return out
 
 
-def sidecar(squeeze: float) -> dict:
+def sidecar(squeeze: float, roll: float | None = None) -> dict:
     return {"facts": {"original_name": "T.MP4", "width": W, "height": H, "fps": "30/1", "pix_fmt": "yuv420p",
-                      "color_range": "tv"}, "assumed": {"squeeze": squeeze}}
+                      "color_range": "tv", "notes": {"roll": roll}}, "assumed": {"squeeze": squeeze}}
 
 
 def expected(sc: dict, framing: dict, aspect: float, size: tuple[int, int]) -> tuple[float, float]:
@@ -76,6 +78,25 @@ def main() -> int:
                 print(f"FAIL squeeze {squeeze} turn {turn} aspect {aspect:.3f} {base}: square at ({mx:.1f}, {my:.1f}),"
                       f" expected ({ex:.1f}, {ey:.1f}) in {size[0]}x{size[1]}")
         print(f"{'FAIL' if failed else 'PASS'} the square lands where the framing puts it ({failed} of {checked} misplaced)")
+
+        # Held on its side: -91.4 is a camera turned a quarter clockwise as its level sensor recorded it, so the
+        # picture turns back three quarters; 88 the other way, 179 upside down, a 3 degree tilt not at all.
+        sideways = 0
+        for roll, turn in ((-91.4, 3), (88.0, 1), (179.0, 2), (-3.0, 0), (None, 0)):
+            sc = sidecar(1.0, roll)
+            aspect = view.aspect(None, [sc])
+            size = view.master([sc], aspect)
+            ex, ey = expected(sc, {}, aspect, size)
+            mx, my = measured(c, sc, {}, aspect, size)
+            portrait = size[1] > size[0]
+            ok = view.window(sc, None, aspect).turn == turn and portrait == bool(turn % 2) and \
+                abs(mx - ex) <= 2.5 and abs(my - ey) <= 2.5
+            sideways += not ok
+            if not ok:
+                print(f"FAIL roll {roll}: turn {view.window(sc, None, aspect).turn}, master {size}, square at "
+                      f"({mx:.1f}, {my:.1f}), expected ({ex:.1f}, {ey:.1f})")
+        print(f"{'FAIL' if sideways else 'PASS'} a clip held on its side comes out upright unframed ({sideways} wrong)")
+        failed += sideways
 
     door = 0
     for squeeze, turn, aspect, zoom, cx, cy in itertools.product((1.0, 1.6), (-1, 0, 1, 2, 7), (2.39, 9 / 16, 1.0),

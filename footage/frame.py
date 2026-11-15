@@ -31,7 +31,7 @@ def unfiled(clip: Path) -> dict:
     info = probe.ffprobe(clip)
     v = next(s for s in info["streams"] if s["codec_type"] == "video")
     f = {"original_name": clip.name, "width": v["width"], "height": v["height"],
-         "camera": probe.camera(clip, info["format"].get("tags", {}))}
+         "camera": probe.camera(clip, info["format"].get("tags", {})), "notes": probe.notes(clip)}
     if develop.raw({"facts": f}):
         raise SystemExit(f"{clip.name} is RAW: file it with python -m footage, which develops it, then ask again")
     return {"facts": f, "assumed": probe.assumed(f)}

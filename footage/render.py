@@ -134,7 +134,7 @@ def render(edit: Path, name: str | None = None) -> Path:
     total = timeline.duration().to_seconds()
     pictures = [(p, read(p[0]) if p[0] else None) for p in items(timeline.video_tracks()[0])]
     filmed = [sc for _, sc in pictures if sc]
-    aspect = view.aspect(settings.get("aspect", view.ASPECT), filmed)
+    aspect = view.aspect(settings.get("aspect"), filmed)
     h = settings.get("height") or view.master(filmed, aspect)[1]
     size = (round(h * aspect / 2) * 2, h)
     rate = filmed[0]["facts"]["fps"]
@@ -184,8 +184,9 @@ def still(clip: Path, t: float, out: Path, look: grade.Look) -> Path:
     sc = read(clip, ("measured",))
     if not 0 <= t < sc["facts"]["duration"]:  # past the end ffmpeg writes nothing
         raise SystemExit(f"{clip.name} is {sc['facts']['duration']:.1f} s long: no frame at {t:g} s")
-    size = view.master([sc])
-    rgb = picture.shot(sc, look, size)(next(decode(clip, sc, t, 1)))
+    aspect = view.aspect(None, [sc])  # the clip as an unframed shot shows it: upright, 2.39 at the widest
+    win = view.window(sc, None, aspect)
+    rgb = picture.shot(sc, look, view.master([sc], aspect), win.turn)(next(decode(clip, sc, t, 1, win=win)))
     bgr = (rgb[[2, 1, 0]].permute(1, 2, 0) * 255).round().byte().cpu().numpy()
     cv2.imwrite(str(out), bgr, [cv2.IMWRITE_JPEG_QUALITY, 100, cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444])
     return out

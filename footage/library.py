@@ -48,6 +48,9 @@ def scan(library: Path, report: list) -> tuple[dict, dict]:
                 continue
             if confirm(p, sc):
                 by_hash[sc["facts"]["sha256"]] = p
+                if "notes" not in sc["facts"]:  # filed before the camera's notes were read: read them once now
+                    n = probe.notes(p)
+                    sidecar.update(p, lambda now: {**now, "facts": {**now["facts"], "notes": n}} if now else None)
             else:
                 report.append(("bytes differ from its sidecar", p.name, p.parent.name))
         except Exception as e:  # one bad clip or sidecar must not stop the rest
