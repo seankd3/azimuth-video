@@ -26,6 +26,11 @@
     }
     root.style.setProperty("color-scheme", theme.mode);
     applied.push("color-scheme");
+    // Shadows follow the mode (emit.SHADOW), so a theme from outside azimuth.css gets the right ones.
+    var light = theme.mode === "light";
+    root.style.setProperty("--az-shadow-float", light ? "0 8px 24px rgba(0, 0, 0, 0.12)" : "0 8px 24px rgba(0, 0, 0, 0.35)");
+    root.style.setProperty("--az-shadow-dialog", light ? "0 16px 48px rgba(0, 0, 0, 0.18)" : "0 16px 48px rgba(0, 0, 0, 0.45)");
+    applied.push("--az-shadow-float", "--az-shadow-dialog");
     root.setAttribute("data-theme", theme.id);
     root.setAttribute("data-mode", theme.mode);
     return true;

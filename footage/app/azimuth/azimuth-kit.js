@@ -5,6 +5,11 @@
  *   AzimuthKit.lights(root)                            normal -> dim -> out -> normal (key L)
  *   AzimuthKit.sliders(root)                           keep each .az-slider's fill and value in step
  *   AzimuthKit.icon(name, size)                        <svg class="az-icon"><use href="#az-i-name">
+ *   AzimuthKit.themes(select, {key, follow, themes})   the one theme picker: System / Azimuth Dark /
+ *                                                      Azimuth Light, remembered; System follows a live
+ *                                                      theme file when the app serves one (follow: url)
+ *
+ * To avoid a flash, call AzimuthKit.themes.restore(key) from a script in <head> (needs only this file).
  */
 (function (global) {
   "use strict";
@@ -88,8 +93,36 @@
     });
   }
 
+  /* ── the theme picker ── */
+  var MODES = { "azimuth-dark": "dark", "azimuth-light": "light" };
+  function read(key) { try { return localStorage.getItem(key) || "system"; } catch (e) { return "system"; } }
+  function write(key, v) { try { localStorage.setItem(key, v); } catch (e) {} }
+  function setBuiltIn(root, id) {
+    if (id === "system") { root.removeAttribute("data-theme"); root.removeAttribute("data-mode"); return; }
+    root.setAttribute("data-theme", id);
+    root.setAttribute("data-mode", MODES[id] || "dark");
+  }
+  function themes(select, opts) {
+    opts = opts || {};
+    var key = opts.key || "az-theme", root = opts.root || document.documentElement, stop = null;
+    var list = opts.themes || [["system", "System"], ["azimuth-dark", "Azimuth Dark"], ["azimuth-light", "Azimuth Light"]];
+    if (!select.options.length) list.forEach(function (t) { var o = document.createElement("option"); o.value = t[0]; o.textContent = t[1]; select.appendChild(o); });
+    function use(v) {
+      if (stop) { stop(); stop = null; }
+      if (global.AzimuthTheme) global.AzimuthTheme.clear(root);
+      setBuiltIn(root, v);
+      if (v === "system" && opts.follow && global.AzimuthTheme) stop = global.AzimuthTheme.follow(opts.follow);
+      select.value = v;
+      if (opts.onChange) opts.onChange(v);
+    }
+    select.addEventListener("change", function () { write(key, select.value); use(select.value); });
+    use(read(key));
+    return { set: function (v) { write(key, v); use(v); }, get: function () { return read(key); } };
+  }
+  themes.restore = function (key, root) { setBuiltIn(root || document.documentElement, read(key || "az-theme")); };
+
   global.AzimuthKit = {
-    icon: icon, toast: toast, lights: lights, sliders: sliders,
+    icon: icon, toast: toast, lights: lights, sliders: sliders, themes: themes,
     set sprite(url) { SPRITE = url || ""; }, get sprite() { return SPRITE; }
   };
 })(typeof window !== "undefined" ? window : this);

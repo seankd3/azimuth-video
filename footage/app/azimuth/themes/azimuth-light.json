@@ -30,13 +30,18 @@
     "row-active": "#e4e5e7",
     "selection": "#cdd5de",
     "pick": "#bf5308",
+    "pick-ink": "#ffffff",
     "go": "#1c7c54",
     "go-ink": "#ffffff",
     "reject": "#b83a3e",
     "reject-ink": "#ffffff",
     "reject-tint": "#f0dfe1",
     "warn": "#935610",
+    "warn-ink": "#ffffff",
     "info": "#2563b8",
+    "info-ink": "#ffffff",
+    "data-1": "#8a4fc4",
+    "data-2": "#13808a",
     "pending": "#dbdcdd",
     "on-photo": "#f2f2f2"
   }

@@ -24,6 +24,7 @@ Segmented 1.0 Segmented.qml
 Select 1.0 Select.qml
 Slider 1.0 Slider.qml
 StatusChip 1.0 StatusChip.qml
+Stepper 1.0 Stepper.qml
 Switch 1.0 Switch.qml
 Timecode 1.0 Timecode.qml
 TimelineRuler 1.0 TimelineRuler.qml

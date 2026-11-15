@@ -38,6 +38,8 @@
 }
 :root, [data-theme="azimuth-dark"] {
   color-scheme: dark;
+  --az-shadow-float: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --az-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.45);
   --az-canvas: #030304;
   --az-panel: #0e0e10;
   --az-panel-raised: #18181b;
@@ -59,19 +61,26 @@
   --az-row-active: #232324;
   --az-selection: #2c2d31;
   --az-pick: #f28c3c;
+  --az-pick-ink: #0b0b0c;
   --az-go: #62b58b;
   --az-go-ink: #0b0b0c;
   --az-reject: #e5696d;
   --az-reject-ink: #0b0b0c;
   --az-reject-tint: #2c1b1d;
   --az-warn: #dba253;
+  --az-warn-ink: #0b0b0c;
   --az-info: #76a9ea;
+  --az-info-ink: #0b0b0c;
+  --az-data-1: #b892ea;
+  --az-data-2: #5ec2c6;
   --az-pending: #2c2c2d;
   --az-on-photo: #f2f2f2;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
+    --az-shadow-float: 0 8px 24px rgba(0, 0, 0, 0.12);
+    --az-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.18);
     --az-canvas: #e6e8eb;
     --az-panel: #f9fafb;
     --az-panel-raised: #eceef1;
@@ -93,19 +102,26 @@
     --az-row-active: #e4e5e7;
     --az-selection: #cdd5de;
     --az-pick: #bf5308;
+    --az-pick-ink: #ffffff;
     --az-go: #1c7c54;
     --az-go-ink: #ffffff;
     --az-reject: #b83a3e;
     --az-reject-ink: #ffffff;
     --az-reject-tint: #f0dfe1;
     --az-warn: #935610;
+    --az-warn-ink: #ffffff;
     --az-info: #2563b8;
+    --az-info-ink: #ffffff;
+    --az-data-1: #8a4fc4;
+    --az-data-2: #13808a;
     --az-pending: #dbdcdd;
     --az-on-photo: #f2f2f2;
   }
 }
 [data-theme="azimuth-light"] {
   color-scheme: light;
+  --az-shadow-float: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --az-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.18);
   --az-canvas: #e6e8eb;
   --az-panel: #f9fafb;
   --az-panel-raised: #eceef1;
@@ -127,13 +143,18 @@
   --az-row-active: #e4e5e7;
   --az-selection: #cdd5de;
   --az-pick: #bf5308;
+  --az-pick-ink: #ffffff;
   --az-go: #1c7c54;
   --az-go-ink: #ffffff;
   --az-reject: #b83a3e;
   --az-reject-ink: #ffffff;
   --az-reject-tint: #f0dfe1;
   --az-warn: #935610;
+  --az-warn-ink: #ffffff;
   --az-info: #2563b8;
+  --az-info-ink: #ffffff;
+  --az-data-1: #8a4fc4;
+  --az-data-2: #13808a;
   --az-pending: #dbdcdd;
   --az-on-photo: #f2f2f2;
 }
@@ -174,6 +195,9 @@
 /* Density: touch grows targets, not type. */
 [data-density="touch"] { --az-size-row: 44px; --az-size-control: 40px; --az-size-control-small: 32px; }
 @media (pointer: coarse) { :root:not([data-density="desk"]) { --az-size-row: 44px; --az-size-control: 40px; --az-size-control-small: 32px; } }
+/* A slider's hit area grows with the density; its track and thumb don't. */
+[data-density="touch"] :is(.az-slider > input[type=range], input[type=range].az-range) { height: 44px; }
+@media (pointer: coarse) { :root:not([data-density="desk"]) :is(.az-slider > input[type=range], input[type=range].az-range) { height: 44px; } }
 
 /* ── top bar ── */
 .az-topbar { display: flex; align-items: center; gap: 18px; min-height: var(--az-size-topbar); padding: 0 12px;
@@ -287,6 +311,7 @@ textarea.az-input { height: auto; min-height: 72px; padding: 7px 9px; resize: ve
 .az-search > .az-input { padding-left: 31px; padding-right: 30px; }
 .az-search > .az-clear { position: absolute; right: 3px; }
 .az-search > .az-input:placeholder-shown ~ .az-clear { display: none; }
+.az-search > .az-input::-webkit-search-cancel-button, .az-search > .az-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
 /* Select: a native select dressed as a quiet button with a chevron. */
 .az-select { position: relative; display: inline-flex; min-width: 0; }
 .az-select > select { appearance: none; -webkit-appearance: none; height: var(--az-size-control); padding: 0 28px 0 10px; max-width: 100%;
@@ -366,9 +391,7 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 
 /* ── floats ── */
 .az-float { background: var(--az-float); color: var(--az-text); border: 1px solid var(--az-line-strong); border-radius: var(--az-radius-float);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
-[data-mode="light"] .az-float, .az-float[data-mode="light"] { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
-@media (prefers-color-scheme: light) { :root:not([data-theme]) .az-float { box-shadow: 0 8px 24px rgba(0, 0, 0, .12); } }
+  box-shadow: var(--az-shadow-float); }
 .az-popmenu { padding: 4px; min-width: 180px; display: flex; flex-direction: column; }
 .az-popmenu > button, .az-popmenu > a { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 9px;
   border-radius: var(--az-radius-control); color: var(--az-text); cursor: default; }
@@ -387,7 +410,7 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 /* Dialog: <dialog class="az-dialog">. */
 .az-dialog { padding: 0; max-width: min(560px, calc(100vw - 32px)); width: 100%; color: var(--az-text);
   background: var(--az-panel-raised); border: 1px solid var(--az-line-strong); border-radius: var(--az-radius-float);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, .45); }
+  box-shadow: var(--az-shadow-dialog); }
 .az-dialog::backdrop { background: rgba(0, 0, 0, .6); }
 .az-dialog > header { padding: 18px 20px 6px; display: flex; flex-direction: column; gap: 4px; }
 .az-dialog > header > h2 { margin: 0; font: 600 17px var(--az-sans); letter-spacing: -.01em; }
@@ -519,6 +542,48 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 .az-histogram > .az-clip-mark[data-end="highlights"] { right: 4px; border-top-color: var(--az-text-3); border-right-color: var(--az-text-3); }
 .az-histogram > .az-clip-mark[data-on][data-end="shadows"] { opacity: 1; border-top-color: var(--az-info); border-left-color: var(--az-info); }
 .az-histogram > .az-clip-mark[data-on][data-end="highlights"] { opacity: 1; border-top-color: var(--az-reject); border-right-color: var(--az-reject); }
+
+/* ── parts Planner needed first ── */
+/* Disclosure: <details class="az-disclosure"><summary>…</summary>…</details>. */
+.az-disclosure { border-top: 1px solid var(--az-line); }
+.az-disclosure > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: var(--az-size-row); padding: 0 12px;
+  cursor: pointer; font: 600 11px var(--az-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--az-text-2); }
+.az-disclosure > summary::-webkit-details-marker { display: none; }
+.az-disclosure > summary::before { content: ""; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.4px 1.4px 0;
+  transform: rotate(-45deg); transition: transform var(--az-motion-fast) var(--az-motion-ease); }
+.az-disclosure[open] > summary::before { transform: rotate(45deg); }
+.az-disclosure > summary:hover { color: var(--az-text); }
+.az-disclosure > :not(summary) { padding: 0 12px 12px; }
+/* Steps: <ol class="az-steps"><li aria-current="step">…</li><li data-done>…</li></ol>. */
+.az-steps { list-style: none; margin: 0; padding: 0; counter-reset: az-step; display: flex; flex-direction: column; }
+.az-steps > li { counter-increment: az-step; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 10px; padding: 10px 12px;
+  border-top: 1px solid var(--az-line); color: var(--az-text-2); }
+.az-steps > li::before { content: counter(az-step); width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--az-line-strong); font: 600 11px var(--az-mono); color: var(--az-text-2); }
+.az-steps > li[aria-current="step"] { color: var(--az-text); }
+.az-steps > li[aria-current="step"]::before { background: var(--az-accent); border-color: var(--az-accent); color: var(--az-accent-ink); }
+.az-steps > li[data-done]::before { content: "✓"; border-color: var(--az-go); color: var(--az-go); }
+/* Scrubber: a slider with the playhead's look, for time. */
+.az-scrubber { display: flex; align-items: center; gap: 10px; }
+.az-scrubber > input[type=range] { flex: 1; appearance: none; -webkit-appearance: none; height: 22px; margin: 0; background: transparent; cursor: pointer; }
+.az-scrubber > input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--az-line-strong); }
+.az-scrubber > input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--az-line-strong); }
+.az-scrubber > input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 3px; height: 18px; margin-top: -7px; border-radius: 1px; background: var(--az-accent); border: 0; }
+.az-scrubber > input[type=range]::-moz-range-thumb { width: 3px; height: 18px; border-radius: 1px; background: var(--az-accent); border: 0; }
+.az-scrubber > input[type=range]:focus-visible { outline: none; }
+.az-scrubber > input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--az-panel), 0 0 0 4px var(--az-focus); }
+[data-density="touch"] .az-scrubber > input[type=range] { height: 44px; }
+@media (pointer: coarse) { :root:not([data-density="desk"]) .az-scrubber > input[type=range] { height: 44px; } }
+/* Map marker: a 28 px disc in a meaning or data colour, a letter in its ink, an on-photo ring;
+   set --az-marker and --az-marker-ink. The hit area is 44 px. */
+.az-marker { position: relative; width: 44px; height: 44px; display: grid; place-items: center; cursor: grab; }
+.az-marker::before { content: ""; position: absolute; width: 28px; height: 28px; border-radius: 50%; background: var(--az-marker, var(--az-accent));
+  box-shadow: 0 0 0 2px var(--az-on-photo), 0 1px 4px rgba(0, 0, 0, .5); }
+.az-marker > span { position: relative; font: 700 12px var(--az-sans); color: var(--az-marker-ink, var(--az-accent-ink)); }
+/* Over pictures and maps, a meaning or data line gets a scrim halo so it reads on any ground. */
+.az-on-media { filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, .7)); }
+/* A toast host for a scrolling page: fixed to the viewport's bottom. */
+.az-toasts[data-fixed] { position: fixed; bottom: max(14px, env(safe-area-inset-bottom, 0px)); }
 
 @media (prefers-reduced-motion: reduce) {
   .az-app *, .az-app *::before, .az-app *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
