@@ -13,6 +13,7 @@
     "panel": "#0e0e10",
     "panel-raised": "#18181b",
     "float": "#212124",
+    "float-hover": "#303032",
     "well": "#08080a",
     "stage": "#030303",
     "tile": "#1e1e1e",

@@ -24,6 +24,7 @@
   --az-space-s6: 16px;
   --az-space-s7: 24px;
   --az-space-s8: 32px;
+  --az-radius-badge: 2px;
   --az-radius-control: 3px;
   --az-radius-panel: 5px;
   --az-radius-float: 7px;
@@ -33,8 +34,10 @@
   --az-motion-slow: 240ms;
   --az-motion-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --az-scrim: rgba(0, 0, 0, 0.62);
+  --az-shade: rgba(0, 0, 0, 0.6);
   --az-surround-grey: #777777;
   --az-surround-light: #c8c8c8;
+  --az-state-disabled: 0.4;
 }
 :root, [data-theme="azimuth-dark"] {
   color-scheme: dark;
@@ -44,6 +47,7 @@
   --az-panel: #0e0e10;
   --az-panel-raised: #18181b;
   --az-float: #212124;
+  --az-float-hover: #303032;
   --az-well: #08080a;
   --az-stage: #030303;
   --az-tile: #1e1e1e;
@@ -85,6 +89,7 @@
     --az-panel: #f9fafb;
     --az-panel-raised: #eceef1;
     --az-float: #e3e5e8;
+    --az-float-hover: #d4d6d9;
     --az-well: #eef0f2;
     --az-stage: #cacaca;
     --az-tile: #eaeaea;
@@ -126,6 +131,7 @@
   --az-panel: #f9fafb;
   --az-panel-raised: #eceef1;
   --az-float: #e3e5e8;
+  --az-float-hover: #d4d6d9;
   --az-well: #eef0f2;
   --az-stage: #cacaca;
   --az-tile: #eaeaea;
@@ -185,7 +191,7 @@
 :where(.az-app) :where(button, input, select, textarea) { font: inherit; color: inherit; }
 :where(.az-app) [hidden] { display: none !important; }
 .az-app :focus-visible { outline: 2px solid var(--az-focus); outline-offset: 2px; }
-.az-app [disabled], .az-app [aria-disabled="true"] { opacity: .4; pointer-events: none; cursor: not-allowed; }
+.az-app [disabled], .az-app [aria-disabled="true"] { opacity: var(--az-state-disabled); pointer-events: none; cursor: not-allowed; }
 .az-icon { width: 16px; height: 16px; flex: none; display: inline-block; vertical-align: -3px; overflow: visible; }
 .az-icon[data-size="12"] { width: 12px; height: 12px; }
 .az-icon[data-size="20"] { width: 20px; height: 20px; }
@@ -227,6 +233,8 @@
   display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .az-phead { display: flex; align-items: center; gap: 8px; height: var(--az-size-panel-head); padding: 0 8px 0 12px; flex: none;
   border-bottom: 1px solid var(--az-line); }
+.az-phead > :is(.az-title, .az-count) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.az-phead > .az-count { flex-shrink: 2; }
 .az-phead > .az-title { font: 600 11px var(--az-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--az-text); }
 .az-phead > .az-count { font: 400 11px var(--az-mono); letter-spacing: .08em; color: var(--az-text-3); }
 .az-phead > .az-tools { margin-left: auto; display: flex; gap: 2px; opacity: .6; transition: opacity var(--az-motion-base); }
@@ -371,9 +379,11 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 .az-btn > .az-key { height: 16px; min-width: 16px; color: inherit; background: transparent; border-color: currentColor; opacity: .7; }
 
 /* Stat tile. */
-.az-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 1px; background: var(--az-line);
+/* Hairlines drawn by each tile (not a gap over a coloured ground), so a short last row leaves no stripe. */
+.az-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); background: var(--az-well);
   border: 1px solid var(--az-line); border-radius: var(--az-radius-control); overflow: hidden; }
-.az-stat-tile { background: var(--az-well); padding: 9px 11px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.az-stat-tile { background: var(--az-well); padding: 9px 11px; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  box-shadow: 1px 0 0 var(--az-line), 0 1px 0 var(--az-line); }
 .az-stat-tile > b { font: 500 20px var(--az-mono); font-variant-numeric: tabular-nums; color: var(--az-text); }
 .az-stat-tile > span { font: 500 9px var(--az-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--az-text-3); }
 .az-stat-tile[data-meaning="go"] > b { color: var(--az-go); }
@@ -395,7 +405,7 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 .az-popmenu { padding: 4px; min-width: 180px; display: flex; flex-direction: column; }
 .az-popmenu > button, .az-popmenu > a { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 9px;
   border-radius: var(--az-radius-control); color: var(--az-text); cursor: default; }
-.az-popmenu > :is(button, a):hover, .az-popmenu > :is(button, a):focus-visible { background: var(--az-row-hover); outline: none; }
+.az-popmenu > :is(button, a):hover, .az-popmenu > :is(button, a):focus-visible { background: var(--az-float-hover); outline: none; }
 .az-popmenu > :is(button, a) > .az-end { margin-left: auto; font: 400 11px var(--az-mono); color: var(--az-text-3); }
 .az-popmenu > hr { border: 0; height: 1px; background: var(--az-line); margin: 4px 0; }
 .az-popmenu > .az-eyebrow { padding: 8px 9px 4px; }
@@ -411,7 +421,7 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 .az-dialog { padding: 0; max-width: min(560px, calc(100vw - 32px)); width: 100%; color: var(--az-text);
   background: var(--az-panel-raised); border: 1px solid var(--az-line-strong); border-radius: var(--az-radius-float);
   box-shadow: var(--az-shadow-dialog); }
-.az-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.az-dialog::backdrop { background: var(--az-shade); }
 .az-dialog > header { padding: 18px 20px 6px; display: flex; flex-direction: column; gap: 4px; }
 .az-dialog > header > h2 { margin: 0; font: 600 17px var(--az-sans); letter-spacing: -.01em; }
 .az-dialog > .az-body { padding: 8px 20px 16px; color: var(--az-text-2); display: flex; flex-direction: column; gap: 12px; }
@@ -454,9 +464,9 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 
 /* Badges on media: a scrim, four fixed corners. */
 .az-media { position: relative; overflow: hidden; background: var(--az-tile); }
-.az-badge { position: absolute; display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; border-radius: 2px; z-index: 2;
+.az-badge { position: absolute; display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; border-radius: var(--az-radius-badge); z-index: 2;
   background: var(--az-scrim); color: var(--az-on-photo); font: 600 10px/1 var(--az-mono); letter-spacing: .06em; text-transform: uppercase;
-  font-variant-numeric: tabular-nums; }
+  font-variant-numeric: tabular-nums;   max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .az-badge[data-corner="tl"] { top: 4px; left: 4px; }
 .az-badge[data-corner="tr"] { top: 4px; right: 4px; }
 .az-badge[data-corner="bl"] { bottom: 4px; left: 4px; }
@@ -473,7 +483,7 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
   animation: az-fade var(--az-motion-base) var(--az-motion-ease); }
 @keyframes az-fade { from { opacity: 0; } }
 .az-cell:hover { outline: 1px solid var(--az-line-hover); }
-.az-cell[aria-selected="true"] { outline: 2px solid var(--az-selection); }
+.az-cell[aria-selected="true"] { outline: 2px solid color-mix(in srgb, var(--az-text) 70%, transparent); }
 .az-cell[aria-current="true"] { outline: 2px solid var(--az-focus); }
 .az-cell[data-state="rejected"] > :is(img, canvas) { opacity: .4; }
 .az-cell[data-state="pending"]::before { content: ""; position: absolute; inset: 0; background: var(--az-pending); animation: az-breathe 1.4s ease-in-out infinite; }
@@ -497,7 +507,7 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
 .az-zoom > .az-value { font: 400 11px var(--az-mono); color: var(--az-text-2); padding: 0 6px; min-width: 44px; text-align: center; }
 
 /* Frame and crop overlay: one for crop and reframe. */
-.az-crop { position: absolute; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .6); outline: 1px solid color-mix(in srgb, var(--az-on-photo) 85%, transparent); z-index: 3; }
+.az-crop { position: absolute; box-shadow: 0 0 0 100vmax var(--az-shade); outline: 1px solid color-mix(in srgb, var(--az-on-photo) 85%, transparent); z-index: 3; }
 .az-crop > .az-thirds { position: absolute; inset: 0; opacity: 0; transition: opacity var(--az-motion-fast);
   background:
     linear-gradient(90deg, transparent calc(33.333% - .5px), color-mix(in srgb, var(--az-on-photo) 30%, transparent) 0 calc(33.333% + .5px), transparent 0 calc(66.666% - .5px), color-mix(in srgb, var(--az-on-photo) 30%, transparent) 0 calc(66.666% + .5px), transparent 0),
