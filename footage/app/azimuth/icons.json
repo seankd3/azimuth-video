@@ -165,6 +165,18 @@
    "d": "M5.5 3.5v9 M10.5 3.5v9",
    "fill": false
   },
+  "stop": {
+   "d": "M4 4h8v8H4z",
+   "fill": true
+  },
+  "focus-near": {
+   "d": "M2.5 3.5v9 M8.5 4L4.5 8l4 4 M13 4L9 8l4 4",
+   "fill": false
+  },
+  "focus-far": {
+   "d": "M13.5 3.5v9 M7.5 4l4 4-4 4 M3 4l4 4-4 4",
+   "fill": false
+  },
   "step-back": {
    "d": "M3.5 3.5v9 M12.5 3.5L6 8l6.5 4.5z",
    "fill": false

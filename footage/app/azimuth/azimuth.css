@@ -239,6 +239,9 @@
 .az-phead > .az-count { font: 400 11px var(--az-mono); letter-spacing: .08em; color: var(--az-text-3); }
 .az-phead > .az-tools { margin-left: auto; display: flex; gap: 2px; opacity: .6; transition: opacity var(--az-motion-base); }
 .az-phead:hover > .az-tools, .az-phead:focus-within > .az-tools { opacity: 1; }
+/* A viewer's head carries its main tools: full strength, and it grows (wraps) at touch size. */
+.az-phead > .az-tools[data-main] { opacity: 1; }
+.az-phead[data-grow] { height: auto; min-height: var(--az-size-panel-head); flex-wrap: wrap; padding-block: 4px; }
 .az-section { padding: 12px; border-bottom: 1px solid var(--az-line); display: flex; flex-direction: column; gap: 10px; }
 .az-section:last-child { border-bottom: 0; }
 .az-eyebrow { font: 600 10.5px var(--az-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--az-text-3); }
@@ -417,6 +420,14 @@ input[type=range].az-range, .az-slider > input[type=range] { appearance: none; -
   background: var(--az-float); border: 1px solid var(--az-line-strong); border-radius: var(--az-radius-control); }
 [data-tip]:hover::after { opacity: 1; transition-delay: 500ms; }
 [data-tip][data-tip-at="top"]::after { top: auto; bottom: calc(100% + 6px); }
+[data-tip][data-tip-at="end"]::after { left: auto; right: 0; transform: none; }
+[data-tip][data-tip-at="start"]::after { left: 0; transform: none; }
+/* A word that means something: <span class="az-meaning" data-meaning="go">Fused</span>. */
+.az-meaning[data-meaning="go"] { color: var(--az-go); }
+.az-meaning[data-meaning="warn"] { color: var(--az-warn); }
+.az-meaning[data-meaning="reject"] { color: var(--az-reject); }
+.az-meaning[data-meaning="info"] { color: var(--az-info); }
+.az-meaning[data-meaning="pick"] { color: var(--az-pick); }
 /* Dialog: <dialog class="az-dialog">. */
 .az-dialog { padding: 0; max-width: min(560px, calc(100vw - 32px)); width: 100%; color: var(--az-text);
   background: var(--az-panel-raised); border: 1px solid var(--az-line-strong); border-radius: var(--az-radius-float);

@@ -41,6 +41,9 @@
 <symbol id="az-i-live" viewBox="0 0 16 16"><path d="M1.5 4.5h9v7h-9z M10.5 7L14.5 5v6l-4-2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="az-i-play" viewBox="0 0 16 16"><path d="M5 3v10l8-5z" fill="currentColor" stroke="none"/></symbol>
 <symbol id="az-i-pause" viewBox="0 0 16 16"><path d="M5.5 3.5v9 M10.5 3.5v9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="az-i-stop" viewBox="0 0 16 16"><path d="M4 4h8v8H4z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="az-i-focus-near" viewBox="0 0 16 16"><path d="M2.5 3.5v9 M8.5 4L4.5 8l4 4 M13 4L9 8l4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="az-i-focus-far" viewBox="0 0 16 16"><path d="M13.5 3.5v9 M7.5 4l4 4-4 4 M3 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="az-i-step-back" viewBox="0 0 16 16"><path d="M3.5 3.5v9 M12.5 3.5L6 8l6.5 4.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="az-i-step-forward" viewBox="0 0 16 16"><path d="M12.5 3.5v9 M3.5 3.5L10 8l-6.5 4.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 <symbol id="az-i-loop" viewBox="0 0 16 16"><path d="M2.5 8V6.5a2 2 0 0 1 2-2h8.5 M11 2.5l2 2-2 2 M13.5 8v1.5a2 2 0 0 1-2 2H3 M5 13.5l-2-2 2-2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>

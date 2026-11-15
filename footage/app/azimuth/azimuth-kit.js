@@ -7,7 +7,8 @@
  *   AzimuthKit.icon(name, size)                        <svg class="az-icon"><use href="#az-i-name">
  *   AzimuthKit.themes(select, {key, follow, themes})   the one theme picker: System / Azimuth Dark /
  *                                                      Azimuth Light, remembered; System follows a live
- *                                                      theme file when the app serves one (follow: url)
+ *                                                      theme file when the app serves one (follow: url);
+ *                                                      ?theme=<id> picks one for a single visit
  *
  * To avoid a flash, call AzimuthKit.themes.restore(key) from a script in <head> (needs only this file).
  */
@@ -116,7 +117,11 @@
       if (opts.onChange) opts.onChange(v);
     }
     select.addEventListener("change", function () { write(key, select.value); use(select.value); });
-    use(read(key));
+    // ?theme=<id> picks a theme for this visit only (opts.param, default "theme"); it isn't remembered.
+    var once = null;
+    try { once = new URLSearchParams(location.search).get(opts.param || "theme"); } catch (e) {}
+    var valid = list.some(function (t) { return t[0] === once; });
+    use(valid ? once : read(key));
     return { set: function (v) { write(key, v); use(v); }, get: function () { return read(key); } };
   }
   themes.restore = function (key, root) { setBuiltIn(root || document.documentElement, read(key || "az-theme")); };
