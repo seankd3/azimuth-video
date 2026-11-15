@@ -28,14 +28,15 @@ def main() -> int:
     from PySide6.QtGui import QGuiApplication, QIcon
     from PySide6.QtQml import QQmlApplicationEngine
 
-    from .backend import Backend, Images, Theme
+    from .backend import Backend, Images, azimuth_qt, design
     app = QGuiApplication(sys.argv)
     app.setApplicationName("Azimuth Video")
     app.setDesktopFileName("azimuth-video")
     app.setWindowIcon(QIcon(str(HERE / "icon.svg")))
-    theme = Theme()
-    backend = Backend(theme)
+    design()
+    backend = Backend()
     engine = QQmlApplicationEngine()
+    azimuth_qt.install(engine)
     engine.addImageProvider("av", Images())
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("lutShader", shader())

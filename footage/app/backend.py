@@ -6,7 +6,6 @@ import hashlib
 import re
 import subprocess
 import time
-import tomllib
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
@@ -14,44 +13,22 @@ from pathlib import Path
 import numpy as np
 import opentimelineio as otio
 from PySide6.QtCore import Property, QFileSystemWatcher, QObject, QProcess, QSize, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QImage
 from PySide6.QtQuick import QQuickImageProvider
 
-from .. import grade, render, view
+from .. import config, grade, render, view
 from . import edit as E
+from .azimuth.qml.Azimuth import azimuth_qt
 
 CACHE = Path.home() / ".cache/azimuth-video/app"
-THEME = Path.home() / ".local/state/omarchy/current/theme/colors.toml"
-DARK = {"background": "#101010", "foreground": "#e8e8e8", "accent": "#d9a441", "muted": "#8a8a8a",
-        "lighter_background": "#1c1c1c", "selection": "#333333", "red": "#e06c5a"}
 FOOTAGE = str(Path.home() / ".local/bin/footage")
 HEAVY = str(Path.home() / ".local/bin/heavy")
 
 
-class Theme(QObject):
-    """The Omarchy theme's colours, followed live, or a dark default off Omarchy."""
-    changed = Signal()
-
-    def __init__(self):
-        super().__init__()
-        self._colors = dict(DARK)
-        self._watch = QFileSystemWatcher([str(THEME.parent)] if THEME.parent.exists() else [])
-        self._watch.directoryChanged.connect(lambda _: QTimer.singleShot(80, self._load))
-        self._load()
-
-    def _load(self):
-        try:
-            self._colors = {**DARK, **{k: v for k, v in tomllib.loads(THEME.read_text()).items()
-                                       if isinstance(v, str) and v.startswith("#")}}
-        except (OSError, tomllib.TOMLDecodeError):
-            self._colors = dict(DARK)
-        self.changed.emit()
-
-    def _c(name, changed=changed):
-        return Property(QColor, lambda self: QColor(self._colors[name]), notify=changed)
-
-    background, foreground, accent, muted = _c("background"), _c("foreground"), _c("accent"), _c("muted")
-    raised, selection, warning = _c("lighter_background"), _c("selection"), _c("red")
+def design() -> QObject:
+    """The window's look: the Azimuth design system's Theme (the vendored kit in azimuth/), on the owner's pick from the
+    config's "theme", which a pick in the window writes back. Call it before the first QQmlEngine is made."""
+    return azimuth_qt.setup(picked=config.load().get("theme", "system"), on_pick=lambda pick: config.save("theme", pick))
 
 
 @cache
@@ -123,9 +100,9 @@ class Backend(QObject):
     renderChanged = Signal()
     message = Signal(str)
 
-    def __init__(self, theme: Theme):
+    def __init__(self):
         super().__init__()
-        self._theme, self._edit, self._shots, self._watch = theme, None, [], QFileSystemWatcher()
+        self._edit, self._shots, self._watch, self._width = None, [], QFileSystemWatcher(), 0
         self._watch.fileChanged.connect(self._outside)
         self._render, self._progress, self._job = None, -1.0, ""
 
@@ -190,6 +167,9 @@ class Backend(QObject):
                             oval=view.squeeze(sc) ** (-1 if framing["turn"] % 2 else 1))
             shots.append(item)
         self._shots = shots
+        filmed = [facts(s["path"]) for s in shots if s["path"]]
+        h = t.metadata.get("footage", {}).get("height") or (view.master(filmed, a)[1] if filmed else 0)
+        self._width = round(h * a / 2) * 2
         self.changed.emit()
 
     def _p(kind, fn, changed=changed):
@@ -208,7 +188,7 @@ class Backend(QObject):
     canRedo = _p(bool, lambda self: bool(self._edit) and self._edit.at < len(self._edit.history) - 1)
     aspects = Property("QStringList", lambda self: [n for n, _ in E.ASPECTS], constant=True)
     looks = Property("QStringList", lambda self: [lk.name for lk in grade.looks()], constant=True)
-    theme = Property(QObject, lambda self: self._theme, constant=True)
+    masterWidth = _p(int, lambda self: self._width)  # the render's width in pixels: the preview's 1:1
     libraryFolder = Property(str, lambda self: str(Path.home() / "Videos/Library"), constant=True)
     editsFolder = Property(str, lambda self: str(Path.home() / "Videos/Edits"), constant=True)
 

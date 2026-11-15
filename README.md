@@ -99,10 +99,15 @@ tests/headless.sh .venv/bin/python tests/app.py   # the app's checks, in a headl
 `footage app [EDIT.otio | CLIP ...]` (or Azimuth Video in the launcher) opens a window on an edit, or starts a new edit
 in `~/Videos/Edits/` from clips. It plays the edit through each shot's framing and prints it in the edit's look live:
 the shot's own print LUT and the look's vignette in a shader, which is the render's picture less the halation. Split,
-trim, move and remove shots on the timeline; frame a shot with **F** (drag the window, scroll to push in, **R** to
-turn); pick the edit's aspect and look in the bar; **Render** runs `footage render` in the GPU lane, and the render
-outlives the window. Every change is written to the edit as it is made, so there is nothing to save. **?** lists the
-keys, which match Omacut's where the two do the same thing.
+trim, move and remove shots on the timeline; frame a shot with **F** (drag the window, scroll or pull a handle to push
+in, **R** to turn, **Esc** to cancel); pick the edit's aspect and look; **Render** runs `footage render` in the GPU
+lane, and the render outlives the window. Every change is written to the edit as it is made, so there is nothing to
+save. Double-click the picture, or use the zoom chip, to see it at 1:1 of the render's pixels. **?** lists the keys,
+which match Omacut's where the two do the same thing.
+
+The window draws with the Azimuth design system, vendored in `footage/app/azimuth/` (do not edit it there; azimuth-design
+re-vendors it). Its theme follows Omarchy's live, or the system's dark or light; pick Azimuth Dark or Light in the bar
+instead, and the pick is kept as `"theme"` in `~/.config/azimuth-video/config.json`.
 
 The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the library. A layout that stays tidy:
 

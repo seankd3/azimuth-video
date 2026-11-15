@@ -126,9 +126,10 @@ def window(folder: Path, sources: list[Path]) -> int:
     from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
 
     from footage.app import __main__ as M
-    from footage.app.backend import Backend, Images, Theme
+    from footage.app.backend import Backend, Images, azimuth_qt, design
 
     _app = QGuiApplication.instance() or QGuiApplication([])  # held: Qt needs it alive
+    design()  # the design system's Theme, before the first engine
 
     def wait(seconds: float):
         loop = QEventLoop()
@@ -136,8 +137,9 @@ def window(folder: Path, sources: list[Path]) -> int:
         loop.exec()
 
     def open_window(path: Path):
-        backend = Backend(Theme())
+        backend = Backend()
         engine = QQmlApplicationEngine()
+        azimuth_qt.install(engine)
         engine.addImageProvider("av", Images())
         engine.rootContext().setContextProperty("backend", backend)
         engine.rootContext().setContextProperty("lutShader", M.shader())
