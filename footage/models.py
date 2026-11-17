@@ -7,7 +7,9 @@ hashes, are enough; checking whether a section is current never reads gigabytes 
 from functools import cache
 from pathlib import Path
 
-FOLDER = Path.home() / ".local/share/footage/models"
+from . import places
+
+FOLDER = places.MODELS
 
 
 def identity(*paths: Path) -> dict:

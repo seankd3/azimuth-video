@@ -10,7 +10,7 @@ import argparse
 import json
 from pathlib import Path
 
-from . import library, sidecar
+from . import library, places, sidecar
 
 KEYS = ("squeeze", "log", "gamut", "neutral_rgb", "exposure")
 
@@ -36,7 +36,7 @@ def targets(lib: Path, names: list[str]) -> list[Path]:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="footage.assume")
     ap.add_argument("args", nargs="+", help="clips or days, then KEY=VALUE settings")
-    ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
+    ap.add_argument("--library", type=Path, default=places.LIBRARY)
     a = ap.parse_args()
     settings = dict(x.split("=", 1) for x in a.args if "=" in x)
     unknown = set(settings) - set(KEYS)

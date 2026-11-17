@@ -4,15 +4,16 @@ For looking up what a transcript's timestamp shows. A filed clip reads its sidec
 developed picture); any other video, such as one still on the card, takes its squeeze from the camera rules, as filing
 would. A RAW clip is seen once filing has developed it, and a clip whose squeeze is unknown not until it is set
 (python -m footage.assume), so a frame is never shown squeezed. The picture is the camera's own (flat log), not the
-grade: python -m footage.render --stills is the graded one.
+grade: python -m footage.render --stills is the graded one. Without --out it goes in ~/Videos/Scratch/<today> frames/.
 
     python -m footage.frame ~/Videos/Library/2026-11-03/SKDA0909.MP4 125.5 --out cut-02:05.jpg
 """
 import argparse
 import subprocess
+from datetime import date
 from pathlib import Path
 
-from . import develop, idle, probe, sidecar, view
+from . import develop, idle, places, probe, sidecar, view
 
 WIDTH = 1600
 
@@ -56,11 +57,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="footage.frame")
     ap.add_argument("clip", type=Path)
     ap.add_argument("seconds", type=seconds, help="125.5, 02:05 or 1:02:05")
-    ap.add_argument("--out", type=Path, help="a .jpg; default: CLIP's name and the time, in the current folder")
+    ap.add_argument("--out", type=Path, help="a .jpg; default: CLIP-SECONDS.jpg in ~/Videos/Scratch/<today> frames/")
     ap.add_argument("--width", type=int, default=WIDTH)
     a = ap.parse_args()
     idle()
-    out = a.out or Path(f"{a.clip.stem}-{a.seconds:.2f}.jpg")
+    out = a.out or places.SCRATCH / f"{date.today()} frames" / f"{a.clip.stem}-{a.seconds:.2f}.jpg"
     if out.suffix.lower() not in (".jpg", ".jpeg"):  # never writes over a clip, or anything but a picture
         raise SystemExit(f"--out must be a .jpg: {out}")
     sc = facts(a.clip)
@@ -70,5 +71,6 @@ if __name__ == "__main__":
         data = b""
     if not data:
         raise SystemExit(f"no frame of {a.clip.name} at {a.seconds:.2f} s: past its end, or ffmpeg cannot decode it")
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(data)
     print(out)

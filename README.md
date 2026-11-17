@@ -114,15 +114,20 @@ The window draws with the Azimuth design system, vendored in `footage/app/azimut
 re-vendors it). Its theme follows Omarchy's live, or the system's dark or light; pick Azimuth Dark or Light in the bar
 instead, and the pick is kept as `"theme"` in `~/.config/azimuth-video/config.json`.
 
-The defaults are `~/Videos/Ingest` for the inbox and `~/Videos/Library` for the library. A layout that stays tidy:
+Everything the toolkit makes lives in `~/Videos`, and its own files (models, programs, caches) in
+`~/.local/share/footage`; `footage/places.py` names each folder. A machine with a drive for video mounts it at those
+two folders. A layout that stays tidy:
 
 - `~/Videos/Ingest/`: the inbox. Copy from the card here.
 - `~/Videos/Library/`: raw footage, one folder per shooting day. Timelines point into it, so keep its name.
 - `~/Videos/Edits/<date> <name>/`: finished edits. The timeline, its renders ("EDIT - LOOK.mp4"), and its stills.
 - `~/Videos/Graded/<day>/`: every clip graded on its own: "CLIP.MP4.otio" and "CLIP.MP4 - LOOK.mp4", the whole take with its sound.
-- `~/Videos/Toolkit tests/<topic>/`: experiments, comparisons and before/after tests. A timeline picks its look
-with `metadata["footage"]["look"]`; `--look` overrides it. Runs and renders use idle CPU and disk priority, so they
-take only what the desktop leaves.
+- `~/Videos/Toolkit tests/<topic>/`: experiments, comparisons and before/after tests.
+- `~/Videos/Scratch/<date> <topic>/`: work in progress that can be deleted: test renders, frames, logs. `footage frame`
+  writes here when given no `--out`.
+
+A timeline picks its look with `metadata["footage"]["look"]`; `--look` overrides it. Runs and renders use idle CPU and
+disk priority, so they take only what the desktop leaves.
 
 ## Install
 
