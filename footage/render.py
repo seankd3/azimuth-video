@@ -25,6 +25,7 @@ python -m footage.render --stills OUT_DIR [--look NAME,NAME...] CLIP@SECONDS ...
 """
 import argparse
 import queue
+import re
 import subprocess
 import threading
 from fractions import Fraction
@@ -84,6 +85,20 @@ def retime(sc: dict, start: float, dur: float) -> str | None:
     return smooth.filters(points, start, dur, sc["facts"]["fps"]) if points else None
 
 
+DECODE_MEMORY = 7 << 27  # 0.875 GiB: bytes of frames the decoder's threads may hold
+
+
+def decode_threads(size: tuple[int, int], fmt: str) -> int:
+    """ffmpeg threads for a CPU decode of frames this size. A decode faster than the grade takes its frames fills
+    ffmpeg's queues between its stages: about 40 frames, 8.4 GB of an 8K 4:4:4 12-bit development, which crossed the
+    media lane's ceiling at 4 threads and at 8. Each frame thread holds about two frames, so big frames get the
+    threads DECODE_MEMORY holds (2 for that development: 1.9 fps, under the grade's 2.3, so the queues stay empty);
+    small frames, whose full queues are small, get 8."""
+    sub, bits = re.fullmatch(r"yuv(4\d\d)p(\d*)(?:le)?", fmt).groups()
+    frame = size[0] * size[1] * {"444": 3, "422": 2, "420": 1.5}[sub] * (2 if int(bits or 8) > 8 else 1)
+    return max(1, min(8, int(DECODE_MEMORY // (2 * frame))))
+
+
 def decode(clip: Path, sc: dict, start: float, frames: int, eased: str = "", win: view.Window | None = None):
     """A shot's frames in recorded pixels, cropped to its window (view.window) and turned, as RGB code values on the
     GPU (picture.frames). ffmpeg hands them over in the file's own YUV, unconverted. The GPU decodes a camera clip
@@ -91,7 +106,8 @@ def decode(clip: Path, sc: dict, start: float, frames: int, eased: str = "", win
     x, y, cw, ch, turn = win or view.window(sc)
     fps = float(Fraction(sc["facts"]["fps"]))
     fmt, full_range = ("yuv444p12le", True) if develop.raw(sc) else (sc["facts"]["pix_fmt"], sc["facts"]["color_range"] == "pc")
-    cmd = [FFMPEG, "-v", "error", *([] if develop.raw(sc) else ["-hwaccel", "cuda"]), "-threads", "8",
+    threads = decode_threads((sc["facts"]["width"], sc["facts"]["height"]), fmt) if develop.raw(sc) else 8
+    cmd = [FFMPEG, "-v", "error", *([] if develop.raw(sc) else ["-hwaccel", "cuda"]), "-threads", str(threads),
            "-ss", f"{start:.3f}", "-t", f"{frames / fps + 1:.3f}", "-i", view.source(clip, sc),
            "-vf", f"trim=end_frame={frames},setpts=PTS-STARTPTS,{eased}crop={cw}:{ch}:{x}:{y},"
                   f"tpad=stop_mode=clone:stop=2,trim=end_frame={frames}",
