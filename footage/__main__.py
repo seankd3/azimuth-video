@@ -9,7 +9,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import GPU_LANE, describe, develop, idle, library, people, probe, sidecar
+from . import GPU_LANE, describe, develop, idle, library, people, places, probe, sidecar
 from .passes import PASSES, Pass, current
 
 
@@ -62,8 +62,8 @@ def fill(lib: Path, p: Pass, report: list) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="footage")
-    ap.add_argument("--ingest", type=Path, default=Path.home() / "Videos/Ingest")
-    ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
+    ap.add_argument("--ingest", type=Path, default=places.INGEST)
+    ap.add_argument("--library", type=Path, default=places.LIBRARY)
     a = ap.parse_args()
     if not GPU_LANE:
         raise SystemExit("The library run uses the GPU: run it as a heavy media job, heavy -l media NAME footage.")

@@ -21,9 +21,9 @@ If `footage` is missing, run the repository's `install.sh`.
   only once its Library copy matches the card by sha256 and size. Delete nothing else from a card.
 - **An edit is one file.** An OpenTimelineIO file in its folder under `~/Videos/Edits/`. The user cuts it by eye in
   the app (`footage app EDIT.otio`); you write it in code, from a script in that folder; `footage render` grades and
-  renders it. The app reads your write in as one more undo step, so it never needs closing first. Never drive the app
-  or open any window on the user's desktop: check the app with `tests/headless.sh`. Show results as stills
-  (`footage render --stills`) or finished files.
+  renders it. The app reads your write in as one more undo step, so it never needs closing first. Never drive the app,
+  install another editor, or open any window on the user's desktop: check the app with `tests/headless.sh`. Show
+  results as stills (`footage render --stills`) or finished files.
 - **Looks.** The looks are files in the repository's `looks/`; `footage grade` lists them. A shot that reads too bright
   or dark gets `footage assume CLIP exposure=STOPS`, never a new look. A new look is a copied JSON file with new numbers.
 - **You are the describer.** `footage` writes description questions under `~/Videos/Library/.questions/`. Answer each
@@ -32,6 +32,10 @@ If `footage` is missing, run the repository's `install.sh`.
   survives the session, runs one GPU job at a time and can't use the memory the desktop needs. GPU work runs nowhere
   else: the library run and `ffmpeg-gpu` refuse outside it, and other tools use the CPU there. Have COMMAND write a
   log and a status file with its exit code, and check them instead of waiting in the foreground.
+- **Where things go.** Everything you make lives in `~/Videos`, the folders `footage/places.py` names: an edit's
+  script, renders and stills in its folder under `~/Videos/Edits/`, and the rest (test renders, frame sequences,
+  frame caches, logs, status files) in `~/Videos/Scratch/<date> <topic>/`. Never in your working folder, a temp
+  folder, `~/.cache` or a repository, which sit on the system drive.
 - **Models.** Footage, its frames and its sound leave the machine only to Claude. No Chinese model and no runtime from a
   Chinese maker (Qwen, Kimi, YuNet, SFace, sherpa-onnx, ACE-Step) runs here, even locally. Before adding a model,
   check who made it and who exported its file. A local model runs with the network off.

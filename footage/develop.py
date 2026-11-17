@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import color, library, probe, sidecar
+from . import color, library, places, probe, sidecar
 
 RAW = {".crm"}
 VERSION = 1  # bump when development changes what a frame's code values are
@@ -34,7 +34,7 @@ DECODERS = 3  # frames developed at once; each LibRaw decode also uses several t
 FOLDER = ".developed"
 # LibRaw built from source with its 2 GB cap on CR3 and CRM files raised (LIBRAW_MAX_CR3_RAW_FILE_SIZE): a minute of 8K
 # RAW is about 11 GB, and the packaged build refuses any file over 2 GB as "too big for processing".
-LIBRAW = Path.home() / ".local/share/footage/vendor/libraw"
+LIBRAW = places.VENDOR / "libraw"
 TOOLS = {**os.environ, "LD_LIBRARY_PATH": str(LIBRAW / "lib")}
 
 

@@ -16,13 +16,13 @@ from PySide6.QtCore import Property, QFileSystemWatcher, QObject, QProcess, QSiz
 from PySide6.QtGui import QImage
 from PySide6.QtQuick import QQuickImageProvider
 
-from .. import config, grade, render, view
+from .. import config, grade, places, render, view
 from . import edit as E
 from .azimuth.qml.Azimuth import azimuth_qt
 
-CACHE = Path.home() / ".cache/azimuth-video/app"
-FOOTAGE = str(Path.home() / ".local/bin/footage")
-HEAVY = str(Path.home() / ".local/bin/heavy")
+CACHE = places.CACHE / "app"
+FOOTAGE = str(places.BIN / "footage")
+HEAVY = str(places.BIN / "heavy")
 
 
 def design() -> QObject:
@@ -116,7 +116,7 @@ class Backend(QObject):
             if paths[0].suffix == ".otio":
                 self._edit = E.Edit(paths[0])
             else:
-                folder = Path.home() / "Videos/Edits" / f"{time.strftime('%Y-%m-%d')} {paths[0].stem}"
+                folder = places.EDITS / f"{time.strftime('%Y-%m-%d')} {paths[0].stem}"
                 folder.mkdir(parents=True, exist_ok=True)
                 out = folder / f"{paths[0].stem}.otio"
                 self._edit = E.Edit(out) if out.exists() else E.Edit(out, E.new(paths))
@@ -189,8 +189,8 @@ class Backend(QObject):
     aspects = Property("QStringList", lambda self: [n for n, _ in E.ASPECTS], constant=True)
     looks = Property("QStringList", lambda self: [lk.name for lk in grade.looks()], constant=True)
     masterWidth = _p(int, lambda self: self._width)  # the render's width in pixels: the preview's 1:1
-    libraryFolder = Property(str, lambda self: str(Path.home() / "Videos/Library"), constant=True)
-    editsFolder = Property(str, lambda self: str(Path.home() / "Videos/Edits"), constant=True)
+    libraryFolder = Property(str, lambda self: str(places.LIBRARY), constant=True)
+    editsFolder = Property(str, lambda self: str(places.EDITS), constant=True)
 
     def _setting(self, key, default):
         return self._edit.timeline.metadata.get("footage", {}).get(key, default) if self._edit else default

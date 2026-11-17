@@ -16,7 +16,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .. import idle, people
+from .. import idle, people, places
 from .formats import name, render
 from .hear import RATE, audio, hear, identity
 
@@ -36,7 +36,7 @@ def main() -> None:
     ap.add_argument("--speakers", type=int, help="how many voices, when known: clustering is much better")
     ap.add_argument("--names", default="", help="names in the order the voices first speak")
     ap.add_argument("--out", type=Path, help="output folder; default: beside FILE")
-    ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library", help="whose people.json knows the voices")
+    ap.add_argument("--library", type=Path, default=places.LIBRARY, help="whose people.json knows the voices")
     a = ap.parse_args()
     idle()
     out = a.out or a.file.resolve().parent

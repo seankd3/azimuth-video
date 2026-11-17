@@ -33,7 +33,7 @@ from pathlib import Path
 
 import opentimelineio as otio
 
-from . import develop, grade, idle, library, passes, people, picture, sidecar, smooth, view
+from . import develop, grade, idle, library, passes, people, picture, places, sidecar, smooth, view
 
 FADE_IN, FADE_OUT = 0.8, 1.0
 QP = 18  # the encoder's constant quantizer: 18 is visually lossless on graded 5K footage
@@ -218,7 +218,7 @@ if __name__ == "__main__":
     idle()
     names = a.look.split(",") if a.look else [None]
     if a.stills:
-        lib = {p.stem: p for p in library.clips(Path.home() / "Videos/Library")}
+        lib = {p.stem: p for p in library.clips(places.LIBRARY)}
         for spec in ([str(a.edit)] if a.edit else []) + a.frames:
             clip, t = spec.split("@")
             for look in (grade.look(n or grade.DEFAULT) for n in names):

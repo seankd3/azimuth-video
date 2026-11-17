@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import focus, library, passes, sidecar, view
+from . import focus, library, passes, places, sidecar, view
 
 VERSION = 1
 W = 480  # frames are matched this many pixels wide, desqueezed
@@ -119,7 +119,7 @@ def angles(clips: list[tuple[Path, dict]]) -> list[dict]:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="footage.takes")
-    ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
+    ap.add_argument("--library", type=Path, default=places.LIBRARY)
     ap.add_argument("--day", help="shooting day, YYYY-MM-DD")
     ap.add_argument("--json", action="store_true", help="for an agent")
     a = ap.parse_args()

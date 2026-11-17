@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import embed, focus, library, passes, people, sidecar, sound, takes
+from . import embed, focus, library, passes, people, places, sidecar, sound, takes
 from .frame import seconds
 from .transcribe.formats import turns
 
@@ -85,7 +85,7 @@ def query(a) -> tuple[str, np.ndarray, Path | None] | None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="footage.find")
     ap.add_argument("words", nargs="*")
-    ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
+    ap.add_argument("--library", type=Path, default=places.LIBRARY)
     ap.add_argument("--size", choices=["close-up", "medium", "wide"])
     ap.add_argument("--person", help="a person's id or name from people.json, seen or heard")
     ap.add_argument("--pulls", action="store_true", help="only clips with a focus pull")

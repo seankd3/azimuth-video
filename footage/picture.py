@@ -19,11 +19,10 @@ import subprocess
 import threading
 from dataclasses import dataclass
 from functools import cache
-from pathlib import Path
 
 import numpy as np
 
-from . import grade
+from . import grade, places
 
 LANCZOS = 3
 AHEAD = 3  # frames decoded ahead, and graded frames waiting for the encoder
@@ -48,7 +47,7 @@ def tensor(a):
 def compiled(fn):
     """fn compiled into fused kernels, kept between runs on disk (never in /tmp). It compiles in this process: a pool
     of compiler processes, each with torch loaded, took gigabytes for kernels compiled once per machine."""
-    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(Path.home() / ".cache/footage/torch"))
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(places.CACHE / "torch"))
     os.environ.setdefault("TORCHINDUCTOR_COMPILE_THREADS", "1")
     import torch
     return torch.compile(fn, dynamic=False)

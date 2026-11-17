@@ -19,9 +19,7 @@ from pathlib import Path
 
 import opentimelineio as otio
 
-from . import grade, idle, library, probe, render
-
-OUT = Path.home() / "Videos/Graded"
+from . import grade, idle, library, places, probe, render
 
 
 @cache
@@ -98,8 +96,8 @@ def grade_all(lib: Path, out: Path, look: grade.Look) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="footage.graded")
     ap.add_argument("--look", default=grade.DEFAULT)
-    ap.add_argument("--out", type=Path, default=OUT)
-    ap.add_argument("--library", type=Path, default=Path.home() / "Videos/Library")
+    ap.add_argument("--out", type=Path, default=places.GRADED)
+    ap.add_argument("--library", type=Path, default=places.LIBRARY)
     a = ap.parse_args()
     idle()
     grade_all(a.library, a.out, grade.look(a.look))
