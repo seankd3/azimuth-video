@@ -185,13 +185,27 @@ def grey_axis(look: Path) -> list[tuple[np.ndarray, np.ndarray]]:
     return [(np.maximum.accumulate(grey[:, c]), target) for c in range(3)]
 
 
+UNCLIP_FROM = 0.92  # code value from which a pixel's colour rolls to neutral, reaching it at color.CLIP
+
+
+def unclip(lin: np.ndarray, code: np.ndarray) -> np.ndarray:
+    """Light the camera clipped, made neutral at its brightness. Where a channel reached the sensor's ceiling the light's
+    colour is unknown: balanced like the rest of the shot, a light clipped in green and blue under a blue correction
+    turns lime. From UNCLIP_FROM to the clip, judged by the brightest channel, the colour fades to the grey of the same
+    luminance, as film and the eye render a light too bright to hold."""
+    s = np.clip((code.max(-1, keepdims=True) - UNCLIP_FROM) / (color.CLIP - UNCLIP_FROM), 0, 1)
+    y = color.luminance(lin)[..., None]
+    return lin + (y - lin) * (s * s * (3 - 2 * s))
+
+
 def print_lut(sc: dict, look: Look) -> np.ndarray:
     """This shot's print LUT: camera code values on a SIZE^3 grid (red changing fastest, as in a .cube file) to the
     display Rec.709 print."""
     grid = np.linspace(0, 1, SIZE)
     b, g, r = np.meshgrid(grid, grid, grid, indexing="ij")
-    lin = color.to_linear_709(np.stack([r, g, b], axis=-1).reshape(-1, 3), sc["assumed"])
-    lin = lin * shading(sc, look, lin) * balance(sc, look)
+    code = np.stack([r, g, b], axis=-1).reshape(-1, 3)
+    lin = color.to_linear_709(code, sc["assumed"])
+    lin = unclip(lin * shading(sc, look, lin) * balance(sc, look), code)
     if look.night and dark(sc, look):  # colour fades out of the shadows of a night: a lot under green lights reads dark
         y = color.luminance(lin)[:, None]
         t = np.clip((y - NIGHT[0]) / (NIGHT[1] - NIGHT[0]), 0, 1)
